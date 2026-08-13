@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from datetime import date
@@ -28,13 +29,12 @@ from robinhood_agent.client import (
     callback_handler,
     redirect_handler,
     read_live_portfolio,
+    read_live_tax_lots,
     select_agentic_account,
 )
 
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
-
-VALID_ANALYSTS = {"market", "social", "news", "fundamentals"}
 
 
 def build_portfolio_context(portfolio: Portfolio) -> str:
@@ -76,47 +76,8 @@ def build_portfolio_context(portfolio: Portfolio) -> str:
     return "\n".join(lines)
 
 
-def build_tradingagents_config() -> dict:
-    """Build the TradingAgents config from DEFAULT_CONFIG and .env overrides."""
-    config = DEFAULT_CONFIG.copy()
-
-    config["llm_provider"] = "google"
-    config["deep_think_llm"] = os.getenv(
-        "TRADINGAGENTS_DEEP_THINK_LLM",
-        config.get("deep_think_llm", "gemini-3.1-flash-lite"),
-    )
-    config["quick_think_llm"] = os.getenv(
-        "TRADINGAGENTS_QUICK_THINK_LLM",
-        config.get("quick_think_llm", "gemini-3.1-flash-lite"),
-    )
-    config["backend_url"] = None
-
-    analysts = config.get(
-        "analysts",
-        ["market", "social", "news", "fundamentals"],
-    )
-    if isinstance(analysts, str):
-        analysts = [item.strip() for item in analysts.split(",") if item.strip()]
-
-    invalid = sorted(set(analysts) - VALID_ANALYSTS)
-    if invalid:
-        raise ValueError(
-            "Invalid TRADINGAGENTS_ANALYSTS values: "
-            f"{invalid}. Valid values: {sorted(VALID_ANALYSTS)}"
-        )
-    if not analysts:
-        raise ValueError("TRADINGAGENTS_ANALYSTS must select at least one analyst.")
-
-    config["analysts"] = list(dict.fromkeys(analysts))
-    return config
-
-
-async def read_portfolio_and_run(symbol: str | None = None) -> None:
-    if LIVE_ORDER_EXECUTION:
-        raise RuntimeError(
-            "Refusing to start: LIVE_ORDER_EXECUTION must be False."
-        )
-
+async def _open_robinhood_session():
+    """Yield an authenticated Robinhood MCP session and account number."""
     storage = FileTokenStorage(TOKEN_FILE)
 
     from httpx2 import AsyncClient
@@ -161,77 +122,117 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
                     )
 
                 account_number = await select_agentic_account(session)
-                payload = await read_live_portfolio(
-                    session,
-                    account_number,
-                )
-                portfolio = Portfolio.from_robinhood_payload(payload)
+                yield session, account_number
 
-                if not portfolio.positions:
-                    raise RuntimeError(
-                        "No equity positions were found in the live portfolio."
-                    )
 
-                anchor = symbol.upper() if symbol else max(
-                    portfolio.positions,
-                    key=lambda p: p.market_value,
-                ).symbol
+async def inspect_tax_lot(symbol: str) -> None:
+    """Print one raw Robinhood tax-lot response for field mapping inspection."""
+    async for session, account_number in _open_robinhood_session():
+        rows_by_symbol = await read_live_tax_lots(
+            session,
+            account_number,
+            [symbol.upper()],
+        )
+        rows = rows_by_symbol.get(symbol.upper(), [])
 
-                known_symbols = {p.symbol for p in portfolio.positions}
-                if anchor not in known_symbols:
-                    raise ValueError(
-                        f"Anchor symbol {anchor} is not in the live portfolio. "
-                        f"Available: {sorted(known_symbols)}"
-                    )
+        print("=" * 72)
+        print(f"RAW ROBINHOOD TAX LOTS — {symbol.upper()}")
+        print("=" * 72)
+        print(json.dumps(rows[:3], indent=2, default=str))
+        print()
+        print(f"Rows returned: {len(rows)}")
+        return
 
-                context = build_portfolio_context(portfolio)
-                config = build_tradingagents_config()
-                analysts = tuple(config["analysts"])
 
-                graph = TradingAgentsGraph(
-                    selected_analysts=analysts,
-                    debug=False,
-                    config=config,
-                )
+async def read_portfolio_and_run(symbol: str | None = None) -> None:
+    if LIVE_ORDER_EXECUTION:
+        raise RuntimeError(
+            "Refusing to start: LIVE_ORDER_EXECUTION must be False."
+        )
 
-                graph.propagator.set_portfolio_context(context)
+    async for session, account_number in _open_robinhood_session():
+        payload = await read_live_portfolio(
+            session,
+            account_number,
+        )
+        portfolio = Portfolio.from_robinhood_payload(payload)
 
-                print("=" * 72)
-                print("TRADINGAGENTS — LIVE ROBINHOOD PORTFOLIO / READ ONLY")
-                print("=" * 72)
-                print(f"TradingAgents source: {TRADINGAGENTS_ROOT}")
-                print(f"Portfolio value: ${portfolio.portfolio_value}")
-                print(f"Buying power:    ${portfolio.buying_power}")
-                print(f"Research anchor: {anchor}")
-                print(f"Analysts:         {', '.join(analysts)}")
-                print(f"Provider:         {config['llm_provider']}")
-                print(f"Deep-think model:  {config['deep_think_llm']}")
-                print(f"Quick-think model: {config['quick_think_llm']}")
-                print(
-                    "Thinking effort:  "
-                    f"{config.get('google_thinking_level') or 'provider default'}"
-                )
-                print()
-                print(context)
-                print()
-                print("Running TradingAgents...")
+        if not portfolio.positions:
+            raise RuntimeError(
+                "No equity positions were found in the live portfolio."
+            )
 
-                _, decision = graph.propagate(
-                    anchor,
-                    date.today().isoformat(),
-                    asset_type="stock",
-                )
+        anchor = symbol.upper() if symbol else max(
+            portfolio.positions,
+            key=lambda p: p.market_value,
+        ).symbol
 
-                print()
-                print("=" * 72)
-                print("TRADINGAGENTS FINAL PORTFOLIO DECISION")
-                print("=" * 72)
-                print(decision)
-                print()
-                print("LIVE ORDER EXECUTION: DISABLED")
-                print("=" * 72)
+        known_symbols = {p.symbol for p in portfolio.positions}
+        if anchor not in known_symbols:
+            raise ValueError(
+                f"Anchor symbol {anchor} is not in the live portfolio. "
+                f"Available: {sorted(known_symbols)}"
+            )
+
+        context = build_portfolio_context(portfolio)
+
+        config = DEFAULT_CONFIG.copy()
+        config["llm_provider"] = "google"
+        config["deep_think_llm"] = os.getenv(
+            "TRADINGAGENTS_DEEP_THINK_LLM",
+            config.get("deep_think_llm", "gemini-3.1-flash-lite"),
+        )
+        config["quick_think_llm"] = os.getenv(
+            "TRADINGAGENTS_QUICK_THINK_LLM",
+            config.get("quick_think_llm", "gemini-3.1-flash-lite"),
+        )
+        config["backend_url"] = None
+
+        graph = TradingAgentsGraph(
+            selected_analysts=(
+                "market",
+                "social",
+                "news",
+                "fundamentals",
+            ),
+            debug=False,
+            config=config,
+        )
+
+        graph.propagator.set_portfolio_context(context)
+
+        print("=" * 72)
+        print("TRADINGAGENTS — LIVE ROBINHOOD PORTFOLIO / READ ONLY")
+        print("=" * 72)
+        print(f"TradingAgents source: {TRADINGAGENTS_ROOT}")
+        print(f"Portfolio value: ${portfolio.portfolio_value}")
+        print(f"Buying power:    ${portfolio.buying_power}")
+        print(f"Research anchor: {anchor}")
+        print()
+        print(context)
+        print()
+        print("Running TradingAgents...")
+
+        _, decision = graph.propagate(
+            anchor,
+            date.today().isoformat(),
+            asset_type="stock",
+        )
+
+        print()
+        print("=" * 72)
+        print("TRADINGAGENTS FINAL PORTFOLIO DECISION")
+        print("=" * 72)
+        print(decision)
+        print()
+        print("LIVE ORDER EXECUTION: DISABLED")
+        print("=" * 72)
+        return
 
 
 if __name__ == "__main__":
-    selected_symbol = sys.argv[1].upper() if len(sys.argv) > 1 else None
-    asyncio.run(read_portfolio_and_run(selected_symbol))
+    if len(sys.argv) == 3 and sys.argv[1] == "--inspect-tax-lot":
+        asyncio.run(inspect_tax_lot(sys.argv[2]))
+    else:
+        selected_symbol = sys.argv[1].upper() if len(sys.argv) > 1 else None
+        asyncio.run(read_portfolio_and_run(selected_symbol))

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NormalizedPosition",
+  "type": "object",
+  "required": ["symbol", "quantity", "position_value", "weight"],
+  "properties": {
+    "symbol": { "type": "string" },
+    "quantity": { "type": "number" },
+    "position_value": { "type": "number" },
+    "weight": { "type": "number" },
+    "last_price": { "type": "number" },
+    "effective_leverage_multiplier": { "type": "number" },
+    "effective_leverage_contribution": { "type": "number" },
+    "tax_lots": { "type": "array" }
+  }
+}

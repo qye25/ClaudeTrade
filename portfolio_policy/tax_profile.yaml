@@ -1,0 +1,12 @@
+filing_status: single
+estimated_taxable_income: 180000
+state: WA
+account_type: taxable_brokerage
+estimated_tax_components:
+  federal_tax_estimate: true
+  washington_tax_estimate: true
+  niit_estimate: true
+notes:
+  - "Estimated tax impact — not tax advice."
+  - "Federal NIIT depends on MAGI and does not automatically apply from taxable income alone."
+  - "Washington capital-gains treatment is computed separately and should not be merged with ordinary income tax rules."

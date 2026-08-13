@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TaxLot",
+  "type": "object",
+  "required": ["symbol", "quantity", "cost_basis", "acquisition_date", "term"],
+  "properties": {
+    "symbol": { "type": "string" },
+    "quantity": { "type": "number" },
+    "cost_basis": { "type": "number" },
+    "acquisition_date": { "type": "string", "format": "date" },
+    "term": { "type": "string", "enum": ["short", "long", "unknown"] },
+    "lot_id": { "type": ["string", "null"] },
+    "current_value": { "type": ["number", "null"] },
+    "current_price": { "type": ["number", "null"] },
+    "unrealized_gain_loss": { "type": ["number", "null"] },
+    "realized_gain_loss": { "type": ["number", "null"] },
+    "wash_sale_status": { "type": ["string", "null"], "enum": ["UNKNOWN", "POSSIBLE", "BLOCKED", null] }
+  }
+}

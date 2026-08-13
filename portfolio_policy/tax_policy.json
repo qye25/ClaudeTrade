@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "status": "user_provided_estimates",
+  "filing_status": "single",
+  "approx_taxable_income_usd": 180000,
+  "state": "WA",
+  "account_type": "taxable_brokerage",
+  "tax_output_label": "Estimated tax impact — not tax advice.",
+  "rules": {
+    "hard_risk_overrides_tax": true,
+    "prefer_lower_tax_cost_when_risk_equivalent": true,
+    "use_lot_level_data_when_available": true,
+    "wash_sale_check_required": true,
+    "llm_calculates_tax": false
+  }
+}

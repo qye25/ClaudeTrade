@@ -1,0 +1,21 @@
+symbols:
+  NFLX:
+    effective_leverage_multiplier: 1
+  RKLB:
+    effective_leverage_multiplier: 1
+  TSLA:
+    effective_leverage_multiplier: 1
+  UPRO:
+    effective_leverage_multiplier: 3
+  DFEN:
+    effective_leverage_multiplier: 3
+
+calculation:
+  formula: |
+    portfolio_effective_leverage =
+      NFLX_weight
+    + RKLB_weight
+    + TSLA_weight
+    + 3 * UPRO_weight
+    + 3 * DFEN_weight
+  note: "This is an exposure approximation rather than a full portfolio-risk model."

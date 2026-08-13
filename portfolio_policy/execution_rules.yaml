@@ -1,0 +1,43 @@
+execution:
+  regular_market_hours_only: true
+  pre_trade_review_required: true
+  final_risk_tax_recheck_required: true
+  live_execution_enabled: false
+
+order_type:
+  default: limit
+  market_orders: disabled
+
+execution_rules:
+  - use_limit_orders_for_normal_rebalance
+  - use_limit_orders_for_tax_driven_trim
+  - use_limit_orders_for_large_or_illiquid_positions
+  - require_review_equity_order_before_eventual_placement
+  - never_default_to_market_orders
+  - block_live_execution_until_user_approval_and_execution_layer_are_enabled
+
+read_only_tools:
+  allowed:
+    - get_accounts
+    - get_portfolio
+    - get_equity_positions
+    - get_equity_quotes
+    - get_equity_tax_lots
+    - get_equity_tradability
+  blocked:
+    - place_equity_order
+    - sell_equity
+    - buy_equity
+    - place_order
+    - market_order
+
+risk_gate:
+  hard_risk_limit_breach: immediate_review_required
+  meaningfully_deviated_position: required_before_trade
+  signal_only_trade: prohibited
+  final_recheck_after_trade: required
+
+notes:
+  - "Market orders prioritize speed over price certainty. Limit orders provide price control but may not fill."
+  - "Risk-safe portfolio changes are required before any new trade is considered."
+  - "The execution layer should inherit deterministic policy rules instead of allowing the LLM to choose timing or order type ad hoc."

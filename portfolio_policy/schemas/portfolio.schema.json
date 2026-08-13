@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NormalizedPortfolio",
+  "type": "object",
+  "required": ["portfolio_value", "positions", "effective_leverage"],
+  "properties": {
+    "portfolio_value": { "type": "number" },
+    "cash": { "type": "number" },
+    "buying_power": { "type": "number" },
+    "effective_leverage": { "type": "number" },
+    "positions": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/position" }
+    }
+  },
+  "definitions": {
+    "position": {
+      "type": "object",
+      "required": ["symbol", "quantity", "position_value", "weight"],
+      "properties": {
+        "symbol": { "type": "string" },
+        "quantity": { "type": "number" },
+        "position_value": { "type": "number" },
+        "weight": { "type": "number" },
+        "effective_leverage_multiplier": { "type": "number" },
+        "effective_leverage_contribution": { "type": "number" }
+      }
+    }
+  }
+}

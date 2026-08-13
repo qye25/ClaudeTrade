@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "effective_date": "2026-08-12",
+  "status": "active",
+
+  "constraints": {
+    "max_effective_leverage": 2.0,
+    "min_trade_usd": 25,
+    "max_trade_usd": 150,
+    "max_trades_per_week": 4,
+    "self_funded_rebalancing": true
+  },
+
+  "decision_hierarchy": [
+    "hard_risk_limits",
+    "leverage_and_concentration",
+    "tax_impact",
+    "trading_signal",
+    "transaction_efficiency"
+  ],
+
+  "signal_rules": {
+    "preferred_bullish_confirmation_days": 2,
+    "signal_only_trading_allowed": false,
+    "persistent_signal_increases_confidence": true
+  },
+
+  "positions": {
+    "UPRO": {
+      "target_weight": 0.45,
+      "preferred_range": [0.35, 0.50],
+      "hard_max_weight": 0.60,
+      "effective_leverage_multiplier": 3
+    },
+    "TSLA": {
+      "target_weight": 0.22,
+      "preferred_range": [0.16, 0.27],
+      "effective_leverage_multiplier": 1
+    },
+    "RKLB": {
+      "target_weight": 0.13,
+      "preferred_range": [0.09, 0.16],
+      "effective_leverage_multiplier": 1
+    },
+    "NFLX": {
+      "target_weight": 0.10,
+      "preferred_range": [0.07, 0.13],
+      "effective_leverage_multiplier": 1
+    },
+    "DFEN": {
+      "target_weight": 0.05,
+      "preferred_range": [0.03, 0.07],
+      "effective_leverage_multiplier": 3
+    }
+  },
+
+  "risk_rules": {
+    "hard_risk_overrides_tax": true,
+    "hard_risk_overrides_signal": true,
+    "do_not_add_above_preferred_max": true,
+    "reduce_hard_limit_breaches": true,
+    "calculate_leverage_before_trade": true,
+    "calculate_leverage_after_trade": true
+  },
+
+  "tax_rules": {
+    "enabled": true,
+    "priority": "secondary_to_risk",
+    "prefer_tax_lots": true,
+    "prefer_lower_tax_cost_when_risk_equivalent": true,
+    "wash_sale_check_required": true,
+    "deterministic_calculation_only": true,
+    "llm_tax_decisions_allowed": false,
+    "output_label": "Estimated tax impact — not tax advice."
+  },
+
+  "execution_rules": {
+    "order_placement_enabled": false,
+    "order_review_requires_risk_approval": true,
+    "live_execution_requires_explicit_user_authorization": true,
+    "policy_changes_require_explicit_user_approval": true
+  }
+}

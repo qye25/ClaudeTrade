@@ -1,0 +1,33 @@
+{
+  "symbol": "RKLB",
+  "timestamp": "2026-08-11T10:00:00",
+  "results": {
+    "tradingagents": {
+      "symbol": "RKLB",
+      "timestamp": "2026-08-11T10:00:00",
+      "action": "HOLD",
+      "confidence": 0.5,
+      "target_weight": 0.15,
+      "holding_period_days": 20,
+      "reason": "Overweight"
+    },
+    "single_gemini": {
+      "symbol": "RKLB",
+      "timestamp": "2026-08-11T10:00:00",
+      "action": "HOLD",
+      "confidence": 0.5,
+      "target_weight": 0.15,
+      "holding_period_days": 20,
+      "reason": "{\n  \"action\": \"HOLD\",\n  \"confidence\": 0.6,\n  \"reason\": \"Neutral sentiment and lack of recent news volume suggest a consolidation phase. PE ratio of 18.0 is reasonable, but current price lacks technical momentum to justify a new entry.\"\n}"
+    },
+    "mechanical": {
+      "symbol": "RKLB",
+      "timestamp": "2026-08-11T10:00:00",
+      "action": "HOLD",
+      "confidence": 0.5,
+      "target_weight": 0.15,
+      "holding_period_days": 20,
+      "reason": "The baseline sees no strong directional edge."
+    }
+  }
+}

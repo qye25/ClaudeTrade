@@ -1,0 +1,31 @@
+tax_rules:
+  use_lot_level_data_when_available: true
+  default_short_term_cutoff_days: 365
+  default_long_term_rate: null
+  default_short_term_rate: null
+  include_wash_sale_check: false
+  wash_sale_status_default: UNKNOWN
+  require_explicit_tax_year: true
+  label: "Estimated tax impact — not tax advice."
+
+capital_gains:
+  long_term_tax_rate_map:
+    low: 0.0
+    medium: 0.15
+    high: 0.20
+  short_term_tax_rate_map:
+    low: 0.10
+    medium: 0.22
+    high: 0.24
+
+state_tax:
+  washington:
+    enabled: true
+    method: "capital_gains_estimate"
+    note: "Washington taxes should be modeled separately from federal capital-gains treatment."
+
+niit:
+  enabled: true
+  threshold_single_filer_magi: 200000
+  rate: 0.038
+  only_apply_when_magi_above_threshold: true

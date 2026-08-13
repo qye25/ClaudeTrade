@@ -1,0 +1,75 @@
+priority_order:
+  - hard_risk_limits
+  - leverage_and_concentration
+  - tax_impact
+  - signal_and_expected_return
+  - transaction_efficiency
+
+selection_rule: |
+  Choose the least-cost portfolio change that satisfies hard risk limits and keeps the
+  final portfolio within leverage and concentration constraints.
+
+monitoring:
+  frequency: hourly
+  market_hours_only: true
+  checks:
+    - refresh_quotes
+    - check_portfolio_weights
+    - check_leverage
+    - check_concentration
+    - check_hard_risk_limit_breaches
+    - do_not_trade_on_signal_change_without_risk_check
+
+rebalance:
+  frequency: daily
+  checks:
+    - run_full_portfolio_optimization
+    - run_tradingagents_analysis
+    - calculate_target_weights
+    - evaluate_tax_lots
+    - determine_if_expected_improvement_exceeds_threshold
+
+risk:
+  hard_breach_review: immediate
+  immediate_exception:
+    - hard_risk_limit_breach_material
+    - out_of_cycle_review_required
+
+order_type:
+  default: limit
+  market_orders: disabled
+  normal_rebalance: limit
+  large_or_illiquid_position: limit_conservative
+  tax_driven_trim: limit
+  urgent_hard_risk_breach: limit_first_then_explicit_escalation
+  extended_hours: limit_only
+  regular_market_hours_only: true
+
+trade_trigger_requirements:
+  - risk_safe_after_trade
+  - no_hard_risk_violation_after_trade
+  - leverage_within_limits
+  - concentration_within_limits
+  - meaningful_deviation_from_target
+  - economic_benefit_exceeds_minimum_threshold
+  - transaction_cost_does_not_overwhelm_benefit
+  - tax_aware_lot_selection
+  - avoid_unnecessary_large_gain_realization
+  - signal_confirmation_supported_by_analysis
+  - final_deterministic_recheck_after_trade
+  - order_review_required_before_live_execution
+
+execution_philosophy: |
+  Hourly checks are not hourly rebalances.
+  The system should monitor frequently during market hours, but should only rebalance once
+  per trading day unless a hard risk limit is materially breached and immediate review is required.
+
+final_review:
+  - verify_hard_risk_limits
+  - verify_effective_leverage
+  - verify_concentration_limits
+  - compute_tax_impact_for_selected_lots
+  - verify_final_portfolio_compliance
+  - require_review_equity_order_before_any_eventual_execution
+
+allow_live_execution: false

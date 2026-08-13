@@ -1,0 +1,16 @@
+hard_risk_limits:
+  max_drawdown_pct: 0.20
+  max_portfolio_leverage: 1.6
+  max_single_position_weight: 0.35
+  max_leveraged_etf_weight: 0.25
+  max_sector_theme_weight: 0.40
+  max_total_leveraged_exposure: 1.75
+  min_cash_buffer_pct: 0.05
+  max_position_turnover_pct_per_month: 0.20
+
+review_rules:
+  require_final_risk_check: true
+  require_final_tax_check: true
+  allow_live_execution: false
+  enforce_hard_limit_before_tax: true
+  fail_closed_if_ambiguous: true

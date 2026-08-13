@@ -1,0 +1,60 @@
+{
+  "UPRO": {
+    "position_quantity": "3",
+    "lots": [
+      {
+        "symbol": "UPRO",
+        "quantity": "2",
+        "cost_basis": "180",
+        "acquisition_date": "2025-01-15",
+        "lot_id": "UPRO-001",
+        "current_value": "240",
+        "current_price": "120",
+        "unrealized_gain_loss": "60",
+        "term": "long",
+        "wash_sale_status": "UNKNOWN"
+      },
+      {
+        "symbol": "UPRO",
+        "quantity": "1",
+        "cost_basis": "90",
+        "acquisition_date": "2025-06-15",
+        "lot_id": "UPRO-002",
+        "current_value": "120",
+        "current_price": "120",
+        "unrealized_gain_loss": "30",
+        "term": "long",
+        "wash_sale_status": "UNKNOWN"
+      }
+    ]
+  },
+  "NFLX": {
+    "position_quantity": "10",
+    "lots": [
+      {
+        "symbol": "NFLX",
+        "quantity": "6",
+        "cost_basis": "210",
+        "acquisition_date": "2024-09-10",
+        "lot_id": "NFLX-001",
+        "current_value": "255",
+        "current_price": "42.50",
+        "unrealized_gain_loss": "45",
+        "term": "long",
+        "wash_sale_status": "UNKNOWN"
+      },
+      {
+        "symbol": "NFLX",
+        "quantity": "4",
+        "cost_basis": "130",
+        "acquisition_date": "2025-04-02",
+        "lot_id": "NFLX-002",
+        "current_value": "170",
+        "current_price": "42.50",
+        "unrealized_gain_loss": "40",
+        "term": "short",
+        "wash_sale_status": "UNKNOWN"
+      }
+    ]
+  }
+}

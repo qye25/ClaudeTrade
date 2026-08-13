@@ -19,14 +19,59 @@ def create_market_analyst(llm):
         research_context = ", ".join(research_symbols)
         minimal_mode = state.get("minimal_mode", False)
 
+        if minimal_mode:
+            symbol = str(state["company_of_interest"]).upper()
+            indicator_limit = 2
+            lookback_days = 10
+            try:
+                stock_data = get_stock_data.invoke(
+                    {"symbol": symbol, "start_date": current_date, "end_date": current_date}
+                )
+            except Exception as exc:
+                stock_data = f"Market data unavailable for {symbol}: {exc}"
+            indicator_results = []
+            for indicator in ("close_10_ema", "rsi")[:indicator_limit]:
+                try:
+                    indicator_results.append(
+                        get_indicators.invoke(
+                            {
+                                "symbol": symbol,
+                                "indicator": indicator,
+                                "curr_date": current_date,
+                                "look_back_days": lookback_days,
+                            }
+                        )
+                    )
+                except Exception as exc:
+                    indicator_results.append(
+                        f"{indicator}: unavailable ({exc})"
+                    )
+            compact_prompt = f"""You are the Market Analyst for a portfolio manager.
+Analyze ONLY {symbol} using the supplied market evidence. Be concise and actionable.
+Do not request tools and do not invent values.
+
+Instrument context:
+{instrument_context}
+
+OHLCV snapshot:
+{stock_data}
+
+Technical indicators:
+{chr(10).join(indicator_results)}
+
+Return a compact market report covering trend, momentum, volatility, and the most important risk/opportunity.
+"""
+            response = llm.invoke(compact_prompt)
+            return {
+                "messages": [response],
+                "market_report": response.content if hasattr(response, "content") else str(response),
+            }
+
         tools = [
             get_stock_data,
             get_indicators,
             get_verified_market_snapshot,
         ]
-
-        indicator_limit = 2 if minimal_mode else 8
-        lookback_days = 10 if minimal_mode else 60
 
         system_message = (
             """You are a trading assistant tasked with analyzing financial markets. """
@@ -34,10 +79,9 @@ def create_market_analyst(llm):
             "Your job is to research every symbol in the selected research universe, "
             "not just the primary anchor. Use exact tickers in tool calls and clearly "
             "separate evidence for each symbol. "
-            f"For each symbol, select no more than {indicator_limit} complementary technical indicators. "
+            f"For each symbol, select no more than 8 complementary technical indicators. "
             "Use concise outputs: do not request unnecessary historical rows. "
-            f"For technical indicators, use at most {lookback_days} calendar days of history. "
-            "Prefer trend + momentum indicators in FAST mode. "
+            "For technical indicators, use at most 60 calendar days of history. "
             "Categories and indicators:\n\n"
             "Moving Averages: close_50_sma, close_200_sma, close_10_ema.\n"
             "MACD Related: macd, macds, macdh.\n"

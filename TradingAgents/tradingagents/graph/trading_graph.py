@@ -1,3 +1,5 @@
+# restored from commit 9164feb378009c3a463e2695f36c49b26b639c2e with minimal max_output_tokens support
+
 import json
 import logging
 import os
@@ -42,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 def _coerce_max_retries(value):
+    """Validate an ``llm_max_retries`` value to a non-negative int."""
     if isinstance(value, bool):
         raise ValueError(f"llm_max_retries must be an integer, not a boolean: {value!r}")
     try:
@@ -107,7 +110,6 @@ class TradingAgentsGraph:
         self._checkpointer_ctx = None
 
     def _get_provider_kwargs(self) -> dict[str, Any]:
-        """Get provider-specific and cross-provider kwargs for LLM creation."""
         kwargs = {}
         provider = self.config.get("llm_provider", "").lower()
 
@@ -143,15 +145,76 @@ class TradingAgentsGraph:
             "market": ToolNode([get_stock_data, get_indicators, get_verified_market_snapshot]),
             "social": ToolNode([get_news]),
             "news": ToolNode([get_news, get_global_news, get_insider_transactions, get_macro_indicators, get_prediction_markets]),
-            "fundamentals": ToolNode([get_fundamentals, get_balance_sheet, get_cashflow, get_income_statement, get_stock_data]),
+            "fundamentals": ToolNode([get_fundamentals, get_balance_sheet, get_cashflow, get_income_statement]),
         }
+
+    def _resolve_benchmark(self, ticker: str) -> str:
+        explicit = self.config.get("benchmark_ticker")
+        if explicit:
+            return explicit
+        benchmark_map = self.config.get("benchmark_map", {})
+        ticker_upper = ticker.upper()
+        for suffix, benchmark in benchmark_map.items():
+            if suffix and ticker_upper.endswith(suffix.upper()):
+                return benchmark
+        return benchmark_map.get("", "SPY")
+
+    def _fetch_returns(self, ticker: str, trade_date: str, holding_days: int = 5, benchmark: str = "SPY") -> tuple[float | None, float | None, int | None]:
+        from tradingagents.dataflows.symbol_utils import normalize_symbol
+        try:
+            start = datetime.strptime(trade_date, "%Y-%m-%d")
+            end = start + timedelta(days=holding_days + 7)
+            end_str = end.strftime("%Y-%m-%d")
+            stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
+            bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
+            if len(stock) < 2 or len(bench) < 2:
+                return None, None, None
+            actual_days = min(holding_days, len(stock) - 1, len(bench) - 1)
+            raw = float((stock["Close"].iloc[actual_days] - stock["Close"].iloc[0]) / stock["Close"].iloc[0])
+            bench_ret = float((bench["Close"].iloc[actual_days] - bench["Close"].iloc[0]) / bench["Close"].iloc[0])
+            alpha = raw - bench_ret
+            return raw, alpha, actual_days
+        except Exception as e:
+            logger.warning("Could not resolve outcome for %s on %s vs %s (will retry next run): %s", ticker, trade_date, benchmark, e)
+            return None, None, None
+
+    def _resolve_pending_entries(self, ticker: str) -> None:
+        pending = [e for e in self.memory_log.get_pending_entries() if e["ticker"] == ticker]
+        if not pending:
+            return
+        benchmark = self._resolve_benchmark(ticker)
+        updates = []
+        for entry in pending:
+            raw, alpha, days = self._fetch_returns(ticker, entry["date"], benchmark=benchmark)
+            if raw is None:
+                continue
+            reflection = self.reflector.reflect_on_final_decision(
+                final_decision=entry.get("decision", ""),
+                raw_return=raw,
+                alpha_return=alpha,
+                benchmark_name=benchmark,
+            )
+            updates.append({
+                "ticker": ticker,
+                "trade_date": entry["date"],
+                "raw_return": raw,
+                "alpha_return": alpha,
+                "holding_days": days,
+                "reflection": reflection,
+            })
+        if updates:
+            self.memory_log.batch_update_with_outcomes(updates)
+
+    def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
+        identity = resolve_instrument_identity(ticker)
+        return build_instrument_context(ticker, asset_type, identity)
 
     def _run_signature(self, asset_type: str) -> str:
         return "|".join([
             "analysts=" + ",".join(self.selected_analysts),
             f"debate={self.config['max_debate_rounds']}",
             f"risk={self.config['max_risk_discuss_rounds']}",
-            "asset=" + asset_type,
+            f"asset={asset_type}",
         ])
 
     def propagate(self, company_name, trade_date, asset_type: str = "stock"):
@@ -222,21 +285,33 @@ class TradingAgentsGraph:
             "company_of_interest": final_state["company_of_interest"],
             "trade_date": final_state["trade_date"],
             "market_report": final_state["market_report"],
-            "fundamentals_report": final_state["fundamentals_report"],
             "sentiment_report": final_state["sentiment_report"],
             "news_report": final_state["news_report"],
+            "fundamentals_report": final_state["fundamentals_report"],
+            "investment_debate_state": {
+                "bull_history": final_state["investment_debate_state"]["bull_history"],
+                "bear_history": final_state["investment_debate_state"]["bear_history"],
+                "history": final_state["investment_debate_state"]["history"],
+                "current_response": final_state["investment_debate_state"]["current_response"],
+                "judge_decision": final_state["investment_debate_state"]["judge_decision"],
+            },
+            "trader_investment_decision": final_state["trader_investment_plan"],
+            "risk_debate_state": {
+                "aggressive_history": final_state["risk_debate_state"]["aggressive_history"],
+                "conservative_history": final_state["risk_debate_state"]["conservative_history"],
+                "neutral_history": final_state["risk_debate_state"]["neutral_history"],
+                "history": final_state["risk_debate_state"]["history"],
+                "judge_decision": final_state["risk_debate_state"]["judge_decision"],
+            },
+            "investment_plan": final_state["investment_plan"],
             "final_trade_decision": final_state["final_trade_decision"],
         }
-
-    def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
-        identity = resolve_instrument_identity(ticker)
-        return build_instrument_context(ticker, asset_type, identity)
-
-    def _resolve_pending_entries(self, ticker):
-        try:
-            self.memory_log.resolve_pending(ticker)
-        except Exception:
-            logger.exception("Failed to resolve pending memory entries for %s", ticker)
+        safe_ticker = safe_ticker_component(self.ticker)
+        directory = Path(self.config["results_dir"]) / safe_ticker / "TradingAgentsStrategy_logs"
+        directory.mkdir(parents=True, exist_ok=True)
+        log_path = directory / f"full_states_log_{trade_date}.json"
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(self.log_states_dict[str(trade_date)], f, indent=4)
 
     def process_signal(self, full_signal):
         return self.signal_processor.process_signal(full_signal)

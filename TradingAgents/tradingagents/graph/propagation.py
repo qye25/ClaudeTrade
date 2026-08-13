@@ -9,26 +9,28 @@ from tradingagents.agents.utils.agent_states import (
 
 
 class Propagator:
-    """Handles state initialization and propagation through the graph."""
+    """Handles state initialization and propagation through the agent graph."""
 
     def __init__(self, max_recur_limit=100):
-        """Initialize with configuration parameters."""
         self.max_recur_limit = max_recur_limit
         self.portfolio_context = ""
         self.research_symbols: tuple[str, ...] = ()
+        self.minimal_mode = False
 
     def set_portfolio_context(self, portfolio_context: str) -> None:
-        """Set the current account context for the next graph run."""
         self.portfolio_context = portfolio_context or ""
 
     def set_research_symbols(self, research_symbols: list[str] | tuple[str, ...]) -> None:
-        """Set the portfolio holdings that analysts should research deeply."""
         cleaned = []
         for symbol in research_symbols:
             value = str(symbol).upper().strip()
             if value and value not in cleaned:
                 cleaned.append(value)
         self.research_symbols = tuple(cleaned)
+
+    def set_minimal_mode(self, minimal_mode: bool) -> None:
+        """Mark the next graph run as FAST/minimal mode."""
+        self.minimal_mode = bool(minimal_mode)
 
     def create_initial_state(
         self,
@@ -51,6 +53,7 @@ class Propagator:
             "past_context": past_context,
             "portfolio_context": portfolio_context or self.portfolio_context,
             "research_symbols": selected_research,
+            "minimal_mode": self.minimal_mode,
             "investment_plan": "",
             "trader_investment_plan": "",
             "investment_debate_state": InvestDebateState(

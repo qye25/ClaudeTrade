@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
 from datetime import date
@@ -34,6 +33,8 @@ from robinhood_agent.client import (
 
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+VALID_ANALYSTS = {"market", "social", "news", "fundamentals"}
 
 
 def build_portfolio_context(portfolio: Portfolio) -> str:
@@ -73,6 +74,41 @@ def build_portfolio_context(portfolio: Portfolio) -> str:
                 )
 
     return "\n".join(lines)
+
+
+def build_tradingagents_config() -> dict:
+    """Build the TradingAgents config from DEFAULT_CONFIG and .env overrides."""
+    config = DEFAULT_CONFIG.copy()
+
+    config["llm_provider"] = "google"
+    config["deep_think_llm"] = os.getenv(
+        "TRADINGAGENTS_DEEP_THINK_LLM",
+        config.get("deep_think_llm", "gemini-3.1-flash-lite"),
+    )
+    config["quick_think_llm"] = os.getenv(
+        "TRADINGAGENTS_QUICK_THINK_LLM",
+        config.get("quick_think_llm", "gemini-3.1-flash-lite"),
+    )
+    config["backend_url"] = None
+
+    analysts = config.get(
+        "analysts",
+        ["market", "social", "news", "fundamentals"],
+    )
+    if isinstance(analysts, str):
+        analysts = [item.strip() for item in analysts.split(",") if item.strip()]
+
+    invalid = sorted(set(analysts) - VALID_ANALYSTS)
+    if invalid:
+        raise ValueError(
+            "Invalid TRADINGAGENTS_ANALYSTS values: "
+            f"{invalid}. Valid values: {sorted(VALID_ANALYSTS)}"
+        )
+    if not analysts:
+        raise ValueError("TRADINGAGENTS_ANALYSTS must select at least one analyst.")
+
+    config["analysts"] = list(dict.fromkeys(analysts))
+    return config
 
 
 async def read_portfolio_and_run(symbol: str | None = None) -> None:
@@ -149,26 +185,11 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
                     )
 
                 context = build_portfolio_context(portfolio)
-
-                config = DEFAULT_CONFIG.copy()
-                config["llm_provider"] = "google"
-                config["deep_think_llm"] = os.getenv(
-                    "TRADINGAGENTS_DEEP_THINK_LLM",
-                    config.get("deep_think_llm", "gemini-3.1-flash-lite"),
-                )
-                config["quick_think_llm"] = os.getenv(
-                    "TRADINGAGENTS_QUICK_THINK_LLM",
-                    config.get("quick_think_llm", "gemini-3.1-flash-lite"),
-                )
-                config["backend_url"] = None
+                config = build_tradingagents_config()
+                analysts = tuple(config["analysts"])
 
                 graph = TradingAgentsGraph(
-                    selected_analysts=(
-                        "market",
-                        "social",
-                        "news",
-                        "fundamentals",
-                    ),
+                    selected_analysts=analysts,
                     debug=False,
                     config=config,
                 )
@@ -182,6 +203,14 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
                 print(f"Portfolio value: ${portfolio.portfolio_value}")
                 print(f"Buying power:    ${portfolio.buying_power}")
                 print(f"Research anchor: {anchor}")
+                print(f"Analysts:         {', '.join(analysts)}")
+                print(f"Provider:         {config['llm_provider']}")
+                print(f"Deep-think model:  {config['deep_think_llm']}")
+                print(f"Quick-think model: {config['quick_think_llm']}")
+                print(
+                    "Thinking effort:  "
+                    f"{config.get('google_thinking_level') or 'provider default'}"
+                )
                 print()
                 print(context)
                 print()

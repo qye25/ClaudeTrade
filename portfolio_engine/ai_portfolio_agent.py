@@ -256,7 +256,7 @@ RETURN THIS JSON SHAPE:
                             reason=str(row.get("reason", "")),
                             confidence=max(
                                 Decimal("0"),
-                                min("1", cls._decimal(row.get("confidence", confidence))),
+                                min(Decimal("1"), cls._decimal(row.get("confidence", confidence))),
                             ),
                         )
                     )
@@ -265,7 +265,6 @@ RETURN THIS JSON SHAPE:
 
         trades = [trade for trade in trades if trade.symbol]
 
-        existing_symbols = {p.symbol for p in portfolio.positions}
         unknown_targets = [s for s in target_weights if not s]
         if unknown_targets:
             for symbol in unknown_targets:
@@ -299,7 +298,6 @@ async def _read_live_portfolio() -> Portfolio:
         OAuthClientProvider,
         AnyUrl,
         ClientSession,
-        AuthorizationCodeResult,
         httpx2,
         select_agentic_account,
         read_live_portfolio,

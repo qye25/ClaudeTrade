@@ -1,3 +1,4 @@
+import os
 from typing import Annotated
 
 from langchain_core.tools import tool
@@ -14,22 +15,33 @@ def get_indicators(
 ) -> str:
     """
     Retrieve a single technical indicator for a given ticker symbol.
-    Uses the configured technical_indicators vendor.
-    Args:
-        symbol (str): Ticker symbol of the company, e.g. AAPL, TSM
-        indicator (str): A single technical indicator name, e.g. 'rsi', 'macd'. Call this tool once per indicator.
-        curr_date (str): The current trading date you are trading on, YYYY-mm-dd
-        look_back_days (int): How many days to look back, default is 30
-    Returns:
-        str: A formatted dataframe containing the technical indicators for the specified ticker symbol and indicator.
+
+    The requested lookback is capped by TRADINGAGENTS_INDICATOR_MAX_LOOKBACK_DAYS
+    (default 60 days) to prevent large indicator tables from consuming the LLM
+    context window. Set the environment variable to override the cap.
     """
-    # LLMs sometimes pass multiple indicators as a comma-separated string;
-    # split and process each individually.
+    try:
+        max_days = max(20, int(os.getenv("TRADINGAGENTS_INDICATOR_MAX_LOOKBACK_DAYS", "60")))
+    except ValueError:
+        max_days = 60
+    try:
+        look_back_days = min(max(1, int(look_back_days)), max_days)
+    except (TypeError, ValueError):
+        look_back_days = min(30, max_days)
+
     indicators = [i.strip().lower() for i in indicator.split(",") if i.strip()]
     results = []
     for ind in indicators:
         try:
-            results.append(route_to_vendor("get_indicators", symbol, ind, curr_date, look_back_days))
+            results.append(
+                route_to_vendor(
+                    "get_indicators",
+                    symbol,
+                    ind,
+                    curr_date,
+                    look_back_days,
+                )
+            )
         except ValueError as e:
             results.append(str(e))
     return "\n\n".join(results)

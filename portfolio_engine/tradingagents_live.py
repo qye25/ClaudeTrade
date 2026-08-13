@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
-from decimal import Decimal
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / "TradingAgents" / ".env")
+TRADINGAGENTS_ROOT = ROOT / "TradingAgents"
+
+# Always use the repository's TradingAgents source instead of a stale package
+# installed in the virtual environment.
+if str(TRADINGAGENTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TRADINGAGENTS_ROOT))
+
+load_dotenv(TRADINGAGENTS_ROOT / ".env")
 
 from portfolio_engine.models import Portfolio
 from robinhood_agent.client import (
@@ -19,7 +27,6 @@ from robinhood_agent.client import (
     TOKEN_FILE,
     FileTokenStorage,
     callback_handler,
-    call_read_only,
     redirect_handler,
     read_live_portfolio,
     select_agentic_account,
@@ -27,7 +34,6 @@ from robinhood_agent.client import (
 
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
-
 
 
 def build_portfolio_context(portfolio: Portfolio) -> str:
@@ -82,7 +88,7 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
     from mcp import ClientSession
     from mcp.client.auth import OAuthClientProvider
     from mcp.client.streamable_http import streamable_http_client
-    from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata
+    from mcp.shared.auth import OAuthClientMetadata
 
     oauth_provider = OAuthClientProvider(
         server_url=ROBINHOOD_MCP_URL,
@@ -126,7 +132,9 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
                 portfolio = Portfolio.from_robinhood_payload(payload)
 
                 if not portfolio.positions:
-                    raise RuntimeError("No equity positions were found in the live portfolio.")
+                    raise RuntimeError(
+                        "No equity positions were found in the live portfolio."
+                    )
 
                 anchor = symbol.upper() if symbol else max(
                     portfolio.positions,
@@ -144,15 +152,11 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
 
                 config = DEFAULT_CONFIG.copy()
                 config["llm_provider"] = "google"
-                config["deep_think_llm"] = __import__(
-                    "os"
-                ).getenv(
+                config["deep_think_llm"] = os.getenv(
                     "TRADINGAGENTS_DEEP_THINK_LLM",
                     config.get("deep_think_llm", "gemini-3.1-flash-lite"),
                 )
-                config["quick_think_llm"] = __import__(
-                    "os"
-                ).getenv(
+                config["quick_think_llm"] = os.getenv(
                     "TRADINGAGENTS_QUICK_THINK_LLM",
                     config.get("quick_think_llm", "gemini-3.1-flash-lite"),
                 )
@@ -174,6 +178,7 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
                 print("=" * 72)
                 print("TRADINGAGENTS — LIVE ROBINHOOD PORTFOLIO / READ ONLY")
                 print("=" * 72)
+                print(f"TradingAgents source: {TRADINGAGENTS_ROOT}")
                 print(f"Portfolio value: ${portfolio.portfolio_value}")
                 print(f"Buying power:    ${portfolio.buying_power}")
                 print(f"Research anchor: {anchor}")
@@ -184,7 +189,7 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
 
                 _, decision = graph.propagate(
                     anchor,
-                    __import__("datetime").date.today().isoformat(),
+                    date.today().isoformat(),
                     asset_type="stock",
                 )
 

@@ -77,7 +77,7 @@ def resolve_run_config(mode: str) -> tuple[tuple[str, ...], dict]:
 
     if requested_mode == "fast":
         analysts = FAST_ANALYSTS
-        thinking = env_thinking or "minimal"
+        thinking = "minimal"
         config["max_debate_rounds"] = 1
         config["max_risk_discuss_rounds"] = 1
     else:

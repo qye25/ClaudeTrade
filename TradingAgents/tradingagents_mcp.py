@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -10,7 +11,6 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
 
-# Always load the .env next to this MCP server.
 PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(PROJECT_DIR / ".env")
 
@@ -35,6 +35,38 @@ PROVIDERS = {
 VALID_ANALYSTS = {"market", "social", "news", "fundamentals"}
 FAST_ANALYSTS = ("market", "news")
 FULL_ANALYSTS = ("market", "social", "news", "fundamentals")
+
+
+def _validate_date(value: str, field_name: str) -> str:
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be YYYY-MM-DD; got {value!r}") from exc
+    return value
+
+
+def _resolve_date_range(
+    analysis_date: str | None,
+    start_date: str | None,
+    end_date: str | None,
+) -> tuple[str, str]:
+    if analysis_date:
+        analysis_date = _validate_date(analysis_date, "analysis_date")
+    if start_date:
+        start_date = _validate_date(start_date, "start_date")
+    if end_date:
+        end_date = _validate_date(end_date, "end_date")
+
+    effective_end = end_date or analysis_date or date.today().isoformat()
+    effective_end = _validate_date(effective_end, "end_date")
+    effective_start = start_date or effective_end
+    effective_start = _validate_date(effective_start, "start_date")
+
+    if effective_start > effective_end:
+        raise ValueError(
+            f"start_date {effective_start} cannot be later than end_date {effective_end}"
+        )
+    return effective_start, effective_end
 
 
 def _build_config(provider: str, mode: str, thinking_level: str | None) -> dict:
@@ -63,8 +95,6 @@ def _build_config(provider: str, mode: str, thinking_level: str | None) -> dict:
             config["reasoning_effort"] = thinking_level
 
     if mode == "fast":
-        # FAST graph routing uses minimal Google thinking as its marker and
-        # bypasses the expensive bull/bear/trader/risk debate path.
         config["google_thinking_level"] = "minimal"
         config["max_debate_rounds"] = 1
         config["max_risk_discuss_rounds"] = 1
@@ -104,11 +134,26 @@ def _run_graph(
     thinking_level: str | None = None,
     portfolio_context: str = "",
     research_symbols: tuple[str, ...] = (),
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> str:
     ticker = ticker.upper().strip()
-    mode = mode.lower().strip()
     selected_analysts = _resolve_analysts(mode, analysts)
     config = _build_config(provider, mode, thinking_level)
+    range_start, range_end = _resolve_date_range(analysis_date, start_date, end_date)
+
+    # Persist the explicit research window in config/context so downstream
+    # agents and the Portfolio Manager have the exact requested analysis range.
+    config["analysis_start_date"] = range_start
+    config["analysis_end_date"] = range_end
+    range_note = (
+        f"ANALYSIS WINDOW: {range_start} through {range_end}. "
+        "Use this exact window when interpreting historical evidence and news."
+    )
+    if portfolio_context:
+        portfolio_context = f"{range_note}\n\n{portfolio_context}"
+    else:
+        portfolio_context = range_note
 
     trading_graph = TradingAgentsGraph(
         selected_analysts=selected_analysts,
@@ -122,7 +167,7 @@ def _run_graph(
 
     _, decision = trading_graph.propagate(
         ticker,
-        analysis_date,
+        range_end,
         asset_type="stock",
     )
 
@@ -132,14 +177,21 @@ def _run_graph(
 @mcp.tool()
 def analyze_stock(
     ticker: str,
-    analysis_date: str,
+    analysis_date: str | None = None,
     provider: str = "google",
     mode: str = "fast",
     analysts: str | None = None,
     thinking_level: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> str:
     """
     Run TradingAgents for one research anchor.
+
+    Date range:
+    - start_date: first date of the requested evidence window, YYYY-MM-DD.
+    - end_date: last date of the requested evidence window, YYYY-MM-DD.
+    - analysis_date is retained for backward compatibility and defaults to end_date.
 
     FAST uses market+news, minimal thinking, and the optimized short graph.
     FULL uses all four analysts by default and honors the requested thinking level.
@@ -147,11 +199,13 @@ def analyze_stock(
     try:
         return _run_graph(
             ticker=ticker,
-            analysis_date=analysis_date,
+            analysis_date=analysis_date or end_date or date.today().isoformat(),
             provider=provider,
             mode=mode,
             analysts=analysts,
             thinking_level=thinking_level,
+            start_date=start_date,
+            end_date=end_date,
         )
     except Exception as exc:
         return f"TradingAgents analysis failed: {type(exc).__name__}: {exc}"
@@ -160,13 +214,15 @@ def analyze_stock(
 @mcp.tool()
 def analyze_portfolio(
     anchor_ticker: str,
-    analysis_date: str,
     portfolio: str,
+    analysis_date: str | None = None,
     provider: str = "google",
     mode: str = "fast",
     research_symbols: str | None = None,
     analysts: str | None = None,
     thinking_level: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> str:
     """
     Run a whole-portfolio TradingAgents decision.
@@ -175,9 +231,11 @@ def analyze_portfolio(
     portfolio context used by the Portfolio Manager: holdings, weights, cash,
     buying power, leverage, and optional tax-lot information.
 
-    The Portfolio Manager receives the entire portfolio. research_symbols is
-    optional and limits the detailed market/news research universe; it does not
-    remove other holdings from the Portfolio Manager's decision context.
+    research_symbols is optional and limits the detailed market/news research
+    universe; it does not remove other holdings from the Portfolio Manager's
+    decision context.
+
+    start_date/end_date define the explicit research window.
     """
     try:
         parsed = json.loads(portfolio)
@@ -194,13 +252,15 @@ def analyze_portfolio(
     try:
         return _run_graph(
             ticker=anchor_ticker,
-            analysis_date=analysis_date,
+            analysis_date=analysis_date or end_date or date.today().isoformat(),
             provider=provider,
             mode=mode,
             analysts=analysts,
             thinking_level=thinking_level,
             portfolio_context=portfolio_context,
             research_symbols=selected_research,
+            start_date=start_date,
+            end_date=end_date,
         )
     except Exception as exc:
         return f"TradingAgents portfolio analysis failed: {type(exc).__name__}: {exc}"

@@ -2,32 +2,24 @@ import os
 
 _TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
 
-# Single source of truth for env-var → config-key overrides. To expose
-# a new config key for environment-based override, add a row here — no
-# entry-point script changes required. Coercion is driven by the type
-# of the existing default, so users can keep writing plain strings in
-# their .env file.
 _ENV_OVERRIDES = {
-    "TRADINGAGENTS_LLM_PROVIDER":         "llm_provider",
-    "TRADINGAGENTS_DEEP_THINK_LLM":       "deep_think_llm",
-    "TRADINGAGENTS_QUICK_THINK_LLM":      "quick_think_llm",
-    "TRADINGAGENTS_LLM_BACKEND_URL":      "backend_url",
-    "TRADINGAGENTS_OUTPUT_LANGUAGE":      "output_language",
-    "TRADINGAGENTS_ANALYSTS":              "analysts",
-    "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
-    "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
-    "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
-    "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
-    "TRADINGAGENTS_TEMPERATURE":          "temperature",
-    "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
-    # Provider-specific reasoning/thinking knobs (None = each provider's own
-    # default). Settable here for non-interactive runs; the CLI also offers an
-    # interactive choice, which is skipped when the matching var is set.
-    "TRADINGAGENTS_GOOGLE_THINKING_LEVEL":   "google_thinking_level",
+    "TRADINGAGENTS_LLM_PROVIDER": "llm_provider",
+    "TRADINGAGENTS_DEEP_THINK_LLM": "deep_think_llm",
+    "TRADINGAGENTS_QUICK_THINK_LLM": "quick_think_llm",
+    "TRADINGAGENTS_LLM_BACKEND_URL": "backend_url",
+    "TRADINGAGENTS_OUTPUT_LANGUAGE": "output_language",
+    "TRADINGAGENTS_ANALYSTS": "analysts",
+    "TRADINGAGENTS_MAX_DEBATE_ROUNDS": "max_debate_rounds",
+    "TRADINGAGENTS_MAX_RISK_ROUNDS": "max_risk_discuss_rounds",
+    "TRADINGAGENTS_CHECKPOINT_ENABLED": "checkpoint_enabled",
+    "TRADINGAGENTS_BENCHMARK_TICKER": "benchmark_ticker",
+    "TRADINGAGENTS_TEMPERATURE": "temperature",
+    "TRADINGAGENTS_LLM_MAX_RETRIES": "llm_max_retries",
+    "TRADINGAGENTS_MAX_OUTPUT_TOKENS": "max_output_tokens",
+    "TRADINGAGENTS_GOOGLE_THINKING_LEVEL": "google_thinking_level",
     "TRADINGAGENTS_OPENAI_REASONING_EFFORT": "openai_reasoning_effort",
-    "TRADINGAGENTS_ANTHROPIC_EFFORT":        "anthropic_effort",
+    "TRADINGAGENTS_ANTHROPIC_EFFORT": "anthropic_effort",
 }
-
 
 _BOOL_TRUE = ("true", "1", "yes", "on")
 _BOOL_FALSE = ("false", "0", "no", "off")
@@ -72,19 +64,17 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
     "memory_log_path": os.getenv("TRADINGAGENTS_MEMORY_LOG_PATH", os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md")),
     "memory_log_max_entries": None,
-    # LLM settings
     "llm_provider": "openai",
     "deep_think_llm": "gpt-5.5",
     "quick_think_llm": "gpt-5.4-mini",
     "backend_url": None,
-    # Analyst team. Use a comma-separated TRADINGAGENTS_ANALYSTS override.
     "analysts": ["market", "social", "news", "fundamentals"],
-    # Provider-specific thinking configuration
     "google_thinking_level": None,
     "openai_reasoning_effort": None,
     "anthropic_effort": None,
     "temperature": None,
     "llm_max_retries": None,
+    "max_output_tokens": None,
     "checkpoint_enabled": False,
     "output_language": "English",
     "max_debate_rounds": 1,

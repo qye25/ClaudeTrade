@@ -10,6 +10,19 @@ from tradingagents.agents.utils.agent_utils import (
 )
 
 
+def _compact_text(value: object, *, max_chars: int = 1800, tail_lines: int = 8) -> str:
+    """Keep only the most useful recent evidence for FAST LLM calls."""
+    text = str(value or "")
+    if len(text) <= max_chars:
+        return text
+    lines = text.splitlines()
+    tail = lines[-tail_lines:]
+    compact = "\n".join(tail)
+    if len(compact) <= max_chars:
+        return "...\n" + compact
+    return compact[-max_chars:]
+
+
 def create_market_analyst(llm):
 
     def market_analyst_node(state):
@@ -21,50 +34,49 @@ def create_market_analyst(llm):
 
         if minimal_mode:
             symbol = str(state["company_of_interest"]).upper()
-            indicator_limit = 2
             lookback_days = 10
             try:
                 stock_data = get_stock_data.invoke(
-                    {"symbol": symbol, "start_date": current_date, "end_date": current_date}
+                    {
+                        "symbol": symbol,
+                        "start_date": current_date,
+                        "end_date": current_date,
+                    }
                 )
             except Exception as exc:
                 stock_data = f"Market data unavailable for {symbol}: {exc}"
-            indicator_results = []
-            for indicator in ("close_10_ema", "rsi")[:indicator_limit]:
-                try:
-                    indicator_results.append(
-                        get_indicators.invoke(
-                            {
-                                "symbol": symbol,
-                                "indicator": indicator,
-                                "curr_date": current_date,
-                                "look_back_days": lookback_days,
-                            }
-                        )
-                    )
-                except Exception as exc:
-                    indicator_results.append(
-                        f"{indicator}: unavailable ({exc})"
-                    )
+
+            try:
+                indicator = get_indicators.invoke(
+                    {
+                        "symbol": symbol,
+                        "indicator": "rsi",
+                        "curr_date": current_date,
+                        "look_back_days": lookback_days,
+                    }
+                )
+            except Exception as exc:
+                indicator = f"RSI unavailable: {exc}"
+
             compact_prompt = f"""You are the Market Analyst for a portfolio manager.
-Analyze ONLY {symbol} using the supplied market evidence. Be concise and actionable.
+Analyze ONLY {symbol} using the supplied evidence. Be concise and actionable.
 Do not request tools and do not invent values.
 
-Instrument context:
-{instrument_context}
+Instrument: {instrument_context}
 
-OHLCV snapshot:
-{stock_data}
+Recent OHLCV evidence:
+{_compact_text(stock_data, max_chars=1200, tail_lines=6)}
 
-Technical indicators:
-{chr(10).join(indicator_results)}
+RSI evidence:
+{_compact_text(indicator, max_chars=900, tail_lines=6)}
 
-Return a compact market report covering trend, momentum, volatility, and the most important risk/opportunity.
+Return a compact report covering trend, momentum, volatility/risk, and the most important opportunity or concern.
 """
             response = llm.invoke(compact_prompt)
+            content = getattr(response, "content", None) or str(response)
             return {
                 "messages": [response],
-                "market_report": response.content if hasattr(response, "content") else str(response),
+                "market_report": content,
             }
 
         tools = [

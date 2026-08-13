@@ -7,6 +7,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_macro_indicators,
     get_news,
     get_prediction_markets,
+    get_research_symbols_from_state,
 )
 
 
@@ -16,6 +17,8 @@ def create_news_analyst(llm):
         asset_type = state.get("asset_type", "stock")
         asset_label = "company" if asset_type == "stock" else "asset"
         instrument_context = get_instrument_context_from_state(state)
+        research_symbols = get_research_symbols_from_state(state)
+        research_context = ", ".join(research_symbols)
 
         tools = [
             get_news,
@@ -25,8 +28,11 @@ def create_news_analyst(llm):
         ]
 
         system_message = (
-            f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(ticker, start_date, end_date) for {asset_label}-specific news by ticker symbol, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) to ground macro commentary in actual data from FRED (e.g. 'cpi', 'core_pce', 'unemployment', 'fed_funds_rate', '10y_treasury', 'yield_curve'), and get_prediction_markets(topic, limit) for live market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events). Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
+            f"You are a news researcher supporting a portfolio manager. Analyze recent news and trends over the past week for every selected portfolio holding: {research_context}. "
+            f"Use get_news(ticker, start_date, end_date) for {asset_label}-specific news by ticker symbol, and use get_global_news, get_macro_indicators, and get_prediction_markets for broader macro context. "
+            "Keep the evidence separated by ticker, identify catalysts and risks, and conclude with a concise cross-portfolio synthesis. "
+            "Do not treat the primary anchor as the only asset that matters. Provide specific, actionable insights with supporting evidence."
+            + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
             + get_language_instruction()
         )
 
@@ -34,15 +40,13 @@ def create_news_analyst(llm):
             [
                 (
                     "system",
-                    "You are a helpful AI assistant, collaborating with other assistants."
-                    " Use the provided tools to progress towards answering the question."
-                    " If you are unable to fully answer, that's OK; another assistant with different tools"
-                    " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
-                    " You have access to the following tools: {tool_names}."
-                    " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
-                    "{system_message}",
+                    "You are a helpful AI assistant collaborating with a portfolio manager. "
+                    "Use the provided tools to progress toward the research task. "
+                    "Today's date is {current_date}. {instrument_context}\n"
+                    "Primary research anchor: {primary_anchor}\n"
+                    "Selected research universe: {research_context}\n"
+                    "Research every selected symbol before finishing.\n"
+                    "{system_message}"
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -52,12 +56,13 @@ def create_news_analyst(llm):
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
+        prompt = prompt.partial(primary_anchor=str(state["company_of_interest"]).upper())
+        prompt = prompt.partial(research_context=research_context)
 
         chain = prompt | llm.bind_tools(tools)
         result = chain.invoke(state["messages"])
 
         report = ""
-
         if len(result.tool_calls) == 0:
             report = result.content
 

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
 
 from .models import Portfolio
 from .trade_proposal import TradeProposal
@@ -252,15 +256,13 @@ RETURN THIS JSON SHAPE:
                             reason=str(row.get("reason", "")),
                             confidence=max(
                                 Decimal("0"),
-                                min(Decimal("1"), cls._decimal(row.get("confidence", confidence))),
+                                min("1", cls._decimal(row.get("confidence", confidence))),
                             ),
                         )
                     )
                 except (TypeError, ValueError):
                     continue
 
-        # Ensure the AI cannot accidentally create a proposal for an empty
-        # symbol. TradeProposal itself performs the remaining field validation.
         trades = [trade for trade in trades if trade.symbol]
 
         existing_symbols = {p.symbol for p in portfolio.positions}
@@ -281,3 +283,131 @@ RETURN THIS JSON SHAPE:
     @staticmethod
     def _decimal(value: Any) -> Decimal:
         return Decimal(str(value))
+
+
+async def _read_live_portfolio() -> Portfolio:
+    """Read the real Robinhood portfolio through the existing read-only MCP path."""
+    load_dotenv(Path(__file__).resolve().parents[1] / "TradingAgents" / ".env")
+
+    from robinhood_agent.client import (
+        LIVE_ORDER_EXECUTION,
+        READ_ONLY_TOOLS,
+        ROBINHOOD_MCP_URL,
+        TOKEN_FILE,
+        FileTokenStorage,
+        OAuthClientMetadata,
+        OAuthClientProvider,
+        AnyUrl,
+        ClientSession,
+        AuthorizationCodeResult,
+        httpx2,
+        select_agentic_account,
+        read_live_portfolio,
+        redirect_handler,
+        callback_handler,
+        streamable_http_client,
+    )
+
+    if LIVE_ORDER_EXECUTION:
+        raise RuntimeError("Refusing AI portfolio read: live execution must be disabled.")
+
+    storage = FileTokenStorage(TOKEN_FILE)
+    oauth_provider = OAuthClientProvider(
+        server_url=ROBINHOOD_MCP_URL,
+        client_metadata=OAuthClientMetadata(
+            client_name="ClaudeTrade AI Portfolio Agent",
+            redirect_uris=[AnyUrl("http://localhost:8765/callback")],
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+        ),
+        storage=storage,
+        redirect_handler=redirect_handler,
+        callback_handler=callback_handler,
+    )
+
+    async with httpx2.AsyncClient(
+        auth=oauth_provider,
+        follow_redirects=True,
+    ) as http_client:
+        async with streamable_http_client(
+            ROBINHOOD_MCP_URL,
+            http_client=http_client,
+            terminate_on_close=False,
+        ) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+
+                tools = await session.list_tools()
+                tool_names = {tool.name for tool in tools.tools}
+                missing = READ_ONLY_TOOLS - tool_names
+                if missing:
+                    raise RuntimeError(
+                        f"Robinhood MCP is missing required read-only tools: {sorted(missing)}"
+                    )
+
+                account_number = await select_agentic_account(session)
+                payload = await read_live_portfolio(session, account_number)
+                return Portfolio.from_robinhood_payload(payload)
+
+
+async def _main() -> None:
+    print("=" * 64)
+    print("AI PORTFOLIO AGENT — READ ONLY")
+    print("=" * 64)
+
+    print("\n[1/2] Reading live Robinhood portfolio...")
+    portfolio = await _read_live_portfolio()
+
+    print(f"Portfolio value: ${portfolio.portfolio_value}")
+    print(f"Buying power:    ${portfolio.buying_power}")
+    print("\nPositions")
+    print("-" * 64)
+    for position in portfolio.positions:
+        print(
+            f"{position.symbol:<8} "
+            f"weight={float(position.weight):>7.2%} "
+            f"value=${position.market_value:>10} "
+            f"leverage={position.effective_leverage_multiplier}x"
+        )
+
+    print("\n[2/2] Asking Gemini for the portfolio decision...")
+    agent = AIPortfolioAgent()
+    decision = agent.decide(portfolio)
+
+    print("\n" + "=" * 64)
+    print("AI THESIS")
+    print("=" * 64)
+    print(decision.thesis)
+
+    print("\nRISK ASSESSMENT")
+    print("-" * 64)
+    print(decision.risk_assessment)
+
+    print("\nTARGET WEIGHTS")
+    print("-" * 64)
+    for symbol, weight in decision.target_weights.items():
+        print(f"{symbol:<8} {float(weight):>7.2%}")
+
+    print("\nPROPOSED TRADES")
+    print("-" * 64)
+    if not decision.trades:
+        print("No trades proposed.")
+    else:
+        for trade in decision.trades:
+            print(
+                f"{trade.side:<5} {trade.symbol:<8} "
+                f"qty={trade.quantity} confidence={float(trade.confidence):.2%}"
+            )
+            print(f"  Reason: {trade.reason}")
+
+    print("\n" + "=" * 64)
+    print("AI SUMMARY")
+    print("=" * 64)
+    print(f"Confidence:     {float(decision.confidence):.2%}")
+    print(f"Holding period: {decision.holding_period_days} days")
+    print("\nLIVE ORDER EXECUTION: DISABLED")
+    print("=" * 64)
+
+
+if __name__ == "__main__":
+    asyncio.run(_main())

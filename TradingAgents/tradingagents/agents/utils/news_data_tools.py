@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+import os
 from typing import Annotated
 
 from langchain_core.tools import tool
@@ -13,15 +15,26 @@ def get_news(
 ) -> str:
     """
     Retrieve news data for a given ticker symbol.
-    Uses the configured news_data vendor.
-    Args:
-        ticker (str): Ticker symbol
-        start_date (str): Start date in yyyy-mm-dd format
-        end_date (str): End date in yyyy-mm-dd format
-    Returns:
-        str: A formatted string containing news data
+
+    The requested window is capped by TRADINGAGENTS_NEWS_MAX_LOOKBACK_DAYS
+    (default 14 days) to keep news context bounded. Set the environment
+    variable to override the cap for deeper research runs.
     """
+    try:
+        max_days = max(3, int(os.getenv("TRADINGAGENTS_NEWS_MAX_LOOKBACK_DAYS", "14")))
+    except ValueError:
+        max_days = 14
+
+    try:
+        end = date.fromisoformat(end_date)
+        start = date.fromisoformat(start_date)
+        capped_start = max(start, end - timedelta(days=max_days))
+        start_date = capped_start.isoformat()
+    except ValueError:
+        pass
+
     return route_to_vendor("get_news", ticker, start_date, end_date)
+
 
 @tool
 def get_global_news(
@@ -34,16 +47,9 @@ def get_global_news(
     Uses the configured news_data vendor. Defaults for look_back_days and
     limit come from DEFAULT_CONFIG (global_news_lookback_days,
     global_news_article_limit); pass explicit values to override.
-
-    Args:
-        curr_date (str): Current date in yyyy-mm-dd format
-        look_back_days (int): Number of days to look back; omit to inherit config
-        limit (int): Maximum number of articles to return; omit to inherit config
-
-    Returns:
-        str: A formatted string containing global news data
     """
     return route_to_vendor("get_global_news", curr_date, look_back_days, limit)
+
 
 @tool
 def get_insider_transactions(
@@ -52,9 +58,5 @@ def get_insider_transactions(
     """
     Retrieve insider transaction information about a company.
     Uses the configured news_data vendor.
-    Args:
-        ticker (str): Ticker symbol of the company
-    Returns:
-        str: A report of insider transaction data
     """
     return route_to_vendor("get_insider_transactions", ticker)

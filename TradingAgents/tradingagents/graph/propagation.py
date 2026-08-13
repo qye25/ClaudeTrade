@@ -14,6 +14,11 @@ class Propagator:
     def __init__(self, max_recur_limit=100):
         """Initialize with configuration parameters."""
         self.max_recur_limit = max_recur_limit
+        self.portfolio_context = ""
+
+    def set_portfolio_context(self, portfolio_context: str) -> None:
+        """Set the current account context for the next graph run."""
+        self.portfolio_context = portfolio_context or ""
 
     def create_initial_state(
         self,
@@ -24,12 +29,7 @@ class Propagator:
         instrument_context: str = "",
         portfolio_context: str = "",
     ) -> dict[str, Any]:
-        """Create the initial state for the agent graph.
-
-        ``instrument_context`` is the deterministic ticker-identity string
-        resolved once at run start. ``portfolio_context`` is the current
-        normalized account state supplied by ClaudeTrade.
-        """
+        """Create the initial state for the agent graph."""
         return {
             "messages": [("human", company_name)],
             "company_of_interest": company_name,
@@ -37,7 +37,7 @@ class Propagator:
             "instrument_context": instrument_context,
             "trade_date": str(trade_date),
             "past_context": past_context,
-            "portfolio_context": portfolio_context,
+            "portfolio_context": portfolio_context or self.portfolio_context,
             "investment_debate_state": InvestDebateState(
                 {
                     "bull_history": "",

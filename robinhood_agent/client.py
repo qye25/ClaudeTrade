@@ -23,6 +23,10 @@ from mcp.shared.auth import (
     OAuthToken,
 )
 
+from portfolio_engine.models import Portfolio
+from portfolio_engine.policy import load_policy
+from portfolio_engine.risk_engine import RiskEngine
+
 
 ROBINHOOD_MCP_URL = "https://agent.robinhood.com/mcp/trading"
 TOKEN_FILE = Path.home() / ".robinhood_mcp_tokens.json"
@@ -67,24 +71,31 @@ class FileTokenStorage(TokenStorage):
 
         try:
             data = json.loads(
-                self.path.read_text(encoding="utf-8")
+                self.path.read_text(
+                    encoding="utf-8"
+                )
             )
 
             if not isinstance(data, dict):
                 return
 
             tokens = data.get("tokens")
+
             if tokens:
                 self._tokens = OAuthToken(**tokens)
 
             client_info = data.get("client_info")
+
             if client_info:
-                self._client_info = OAuthClientInformationFull(
-                    **client_info
+                self._client_info = (
+                    OAuthClientInformationFull(
+                        **client_info
+                    )
                 )
 
         except Exception:
-            # A corrupt token file should not prevent a fresh OAuth flow.
+            # A corrupt token file should not prevent
+            # a fresh OAuth flow.
             self._tokens = None
             self._client_info = None
 
@@ -103,7 +114,10 @@ class FileTokenStorage(TokenStorage):
         }
 
         self.path.write_text(
-            json.dumps(data, indent=2),
+            json.dumps(
+                data,
+                indent=2,
+            ),
             encoding="utf-8",
         )
 
@@ -112,10 +126,15 @@ class FileTokenStorage(TokenStorage):
         except OSError:
             pass
 
-    async def get_tokens(self) -> OAuthToken | None:
+    async def get_tokens(
+        self,
+    ) -> OAuthToken | None:
         return self._tokens
 
-    async def set_tokens(self, tokens: OAuthToken) -> None:
+    async def set_tokens(
+        self,
+        tokens: OAuthToken,
+    ) -> None:
         self._tokens = tokens
         self._save()
 
@@ -146,6 +165,7 @@ async def _handle_callback_request(
 
     try:
         request = await reader.read(65535)
+
         request_text = request.decode(
             "utf-8",
             errors="replace",
@@ -181,8 +201,15 @@ async def _handle_callback_request(
         parsed = urlparse(path)
         query = parse_qs(parsed.query)
 
-        code = query.get("code", [None])[0]
-        state = query.get("state", [None])[0]
+        code = query.get(
+            "code",
+            [None],
+        )[0]
+
+        state = query.get(
+            "state",
+            [None],
+        )[0]
 
         if code:
             CALLBACK_RESULT = {
@@ -193,20 +220,25 @@ async def _handle_callback_request(
             body = (
                 "<html><body>"
                 "<h1>Authorization complete</h1>"
-                "<p>You can close this window and return to ClaudeTrade.</p>"
+                "<p>"
+                "You can close this window and return "
+                "to ClaudeTrade."
+                "</p>"
                 "</body></html>"
             ).encode()
 
             headers = (
                 b"HTTP/1.1 200 OK\r\n"
                 + f"Content-Length: {len(body)}\r\n".encode()
-                + b"Content-Type: text/html; charset=utf-8\r\n"
+                + b"Content-Type: text/html; "
+                b"charset=utf-8\r\n"
                 + b"Connection: close\r\n"
                 + b"\r\n"
             )
 
             writer.write(headers)
             writer.write(body)
+
             await writer.drain()
 
         else:
@@ -215,20 +247,24 @@ async def _handle_callback_request(
             body = (
                 "<html><body>"
                 "<h1>Authorization failed</h1>"
-                "<p>No authorization code was returned.</p>"
+                "<p>"
+                "No authorization code was returned."
+                "</p>"
                 "</body></html>"
             ).encode()
 
             headers = (
                 b"HTTP/1.1 400 Bad Request\r\n"
                 + f"Content-Length: {len(body)}\r\n".encode()
-                + b"Content-Type: text/html; charset=utf-8\r\n"
+                + b"Content-Type: text/html; "
+                b"charset=utf-8\r\n"
                 + b"Connection: close\r\n"
                 + b"\r\n"
             )
 
             writer.write(headers)
             writer.write(body)
+
             await writer.drain()
 
     finally:
@@ -265,14 +301,17 @@ def _oauth_url() -> str:
     )
 
 
-async def redirect_handler(url: str | AnyUrl) -> None:
+async def redirect_handler(
+    url: str | AnyUrl,
+) -> None:
     """Open the OAuth authorization URL."""
 
     url_string = str(url)
 
     print()
     print(
-        "Open the browser window for Robinhood authentication."
+        "Open the browser window for "
+        "Robinhood authentication."
     )
     print(url_string)
     print()
@@ -288,7 +327,8 @@ async def callback_handler() -> AuthorizationCodeResult:
     await start_callback_server()
 
     deadline = (
-        asyncio.get_running_loop().time() + 180
+        asyncio.get_running_loop().time()
+        + 180
     )
 
     while CALLBACK_RESULT is None:
@@ -303,6 +343,7 @@ async def callback_handler() -> AuthorizationCodeResult:
         await asyncio.sleep(0.25)
 
     result = CALLBACK_RESULT
+
     CALLBACK_RESULT = None
 
     return AuthorizationCodeResult(
@@ -336,7 +377,8 @@ def extract_data(result) -> dict:
 
     if not isinstance(content, dict):
         raise RuntimeError(
-            f"Unexpected MCP response shape: {content!r}"
+            f"Unexpected MCP response shape: "
+            f"{content!r}"
         )
 
     # Some MCP tools return {"data": {...}}.
@@ -357,7 +399,8 @@ async def call_read_only(
 
     if name not in READ_ONLY_TOOLS:
         raise RuntimeError(
-            f"BLOCKED: {name} is not in the read-only allowlist."
+            f"BLOCKED: {name} is not in "
+            "the read-only allowlist."
         )
 
     if LIVE_ORDER_EXECUTION:
@@ -372,7 +415,9 @@ async def call_read_only(
     )
 
 
-async def select_agentic_account(session) -> str:
+async def select_agentic_account(
+    session,
+) -> str:
     """Find the Robinhood account explicitly enabled for agentic access."""
 
     result = await call_read_only(
@@ -393,24 +438,29 @@ async def select_agentic_account(session) -> str:
 
     if not isinstance(accounts, list):
         raise RuntimeError(
-            f"Unexpected accounts payload: {accounts!r}"
+            f"Unexpected accounts payload: "
+            f"{accounts!r}"
         )
 
     eligible = [
         account
         for account in accounts
-        if isinstance(account, dict)
-        and account.get("agentic_allowed") is True
+        if (
+            isinstance(account, dict)
+            and account.get("agentic_allowed") is True
+        )
     ]
 
     if not eligible:
         raise RuntimeError(
-            "No Robinhood account with agentic_allowed=true was found."
+            "No Robinhood account with "
+            "agentic_allowed=true was found."
         )
 
     if len(eligible) > 1:
         raise RuntimeError(
-            f"Expected one Agentic account, found {len(eligible)}."
+            f"Expected one Agentic account, "
+            f"found {len(eligible)}."
         )
 
     account = eligible[0]
@@ -422,7 +472,8 @@ async def select_agentic_account(session) -> str:
 
     if not account_number:
         raise RuntimeError(
-            "Selected Agentic account is missing an account_number."
+            "Selected Agentic account is missing "
+            "an account_number."
         )
 
     return str(account_number)
@@ -433,7 +484,10 @@ def extract_symbols(
 ) -> list[str]:
     """Extract unique symbols from the live position payload."""
 
-    rows = positions.get("positions", [])
+    rows = positions.get(
+        "positions",
+        [],
+    )
 
     if not isinstance(rows, list):
         return []
@@ -446,7 +500,10 @@ def extract_symbols(
             continue
 
         symbol = str(
-            position.get("symbol", "")
+            position.get(
+                "symbol",
+                "",
+            )
         ).upper().strip()
 
         if symbol and symbol not in seen:
@@ -455,16 +512,32 @@ def extract_symbols(
 
     return symbols
 
+
 def normalize_portfolio(
     portfolio: dict,
     positions: dict,
     quotes: dict,
 ) -> dict:
-    """Convert Robinhood MCP payloads into ClaudeTrade's normalized model."""
+    """
+    Convert Robinhood MCP payloads into
+    ClaudeTrade's normalized model.
+    """
 
-    # Robinhood uses `total_value` for the portfolio's current value.
+    # Robinhood normally uses `total_value`.
+    #
+    # Some tests / normalized fixtures may instead
+    # use `portfolio_value`, so support both.
     portfolio_value = Decimal(
-        str(portfolio.get("total_value", 0) or 0)
+        str(
+            portfolio.get(
+                "total_value",
+                portfolio.get(
+                    "portfolio_value",
+                    0,
+                ),
+            )
+            or 0
+        )
     )
 
     # Robinhood returns buying_power as a nested object:
@@ -474,12 +547,25 @@ def normalize_portfolio(
     #     "unleveraged_buying_power": "0.0000",
     #     "display_currency": "USD"
     # }
-    raw_buying_power = portfolio.get("buying_power", 0)
+    #
+    # Tests may provide a simple string such as:
+    #
+    # "buying_power": "10000.00"
+    #
+    # Support both forms.
+
+    raw_buying_power = portfolio.get(
+        "buying_power",
+        0,
+    )
 
     if isinstance(raw_buying_power, dict):
         raw_buying_power = raw_buying_power.get(
             "buying_power",
-            0,
+            raw_buying_power.get(
+                "unleveraged_buying_power",
+                0,
+            ),
         )
 
     buying_power = Decimal(
@@ -507,10 +593,14 @@ def normalize_portfolio(
     #     "TSLA": Decimal("327.45"),
     #     ...
     # }
+
     quote_map: dict[str, Decimal] = {}
 
     quote_results = (
-        quotes.get("results", [])
+        quotes.get(
+            "results",
+            [],
+        )
         if isinstance(quotes, dict)
         else []
     )
@@ -522,20 +612,27 @@ def normalize_portfolio(
         if not isinstance(result, dict):
             continue
 
-        quote = result.get("quote", {})
+        quote = result.get(
+            "quote",
+            {},
+        )
 
         if not isinstance(quote, dict):
             continue
 
         symbol = str(
-            quote.get("symbol", "")
+            quote.get(
+                "symbol",
+                "",
+            )
         ).upper()
 
         if not symbol:
             continue
 
-        # Prefer the most recent trade price.
-        # Fall back to non-regular-hours price and then
+        # Prefer the regular-session last trade.
+        #
+        # Fall back to after-hours price and then
         # previous close if necessary.
         raw_price = (
             quote.get("last_trade_price")
@@ -563,7 +660,10 @@ def normalize_portfolio(
             continue
 
         symbol = str(
-            position.get("symbol", "")
+            position.get(
+                "symbol",
+                "",
+            )
         ).upper()
 
         if not symbol:
@@ -579,11 +679,12 @@ def normalize_portfolio(
             )
         )
 
-        # Current market price comes from get_equity_quotes.
+        # Current market price comes from
+        # get_equity_quotes.
         last_price = quote_map.get(symbol)
 
-        # Fallback in case Robinhood eventually provides a
-        # price directly in the position payload.
+        # Fallback in case Robinhood eventually
+        # provides a price directly in the position.
         if last_price is None:
             raw_price = (
                 position.get("last_price")
@@ -595,8 +696,8 @@ def normalize_portfolio(
                 str(raw_price or 0)
             )
 
-        # Robinhood's position payload does not contain
-        # market_value, so calculate it ourselves.
+        # Robinhood's position payload does not
+        # contain market_value, so calculate it.
         market_value = quantity * last_price
 
         # Portfolio weight.
@@ -626,7 +727,9 @@ def normalize_portfolio(
                     rounding=ROUND_HALF_UP,
                 )
             ),
-            "leverage_multiplier": str(leverage),
+            "leverage_multiplier": str(
+                leverage
+            ),
             "effective_leverage_contribution": str(
                 effective_leverage_contribution.quantize(
                     Decimal("0.0001"),
@@ -650,6 +753,134 @@ def normalize_portfolio(
         ),
         "positions": normalized_positions,
     }
+
+
+def build_risk_report(
+    normalized: dict,
+) -> dict:
+    """
+    Build the lightweight ClaudeTrade risk report.
+
+    NOTE:
+    The main application now uses RiskEngine.
+    This helper remains useful for simple diagnostics/tests.
+    """
+
+    positions = normalized.get(
+        "positions",
+        {},
+    )
+
+    total_effective_exposure = Decimal("0")
+
+    risk_flags = []
+
+    for symbol, position in positions.items():
+        weight = Decimal(
+            str(
+                position.get(
+                    "weight",
+                    "0",
+                )
+            )
+        )
+
+        leverage = Decimal(
+            str(
+                position.get(
+                    "leverage_multiplier",
+                    "1",
+                )
+            )
+        )
+
+        effective = weight * leverage
+
+        total_effective_exposure += effective
+
+        if (
+            leverage > Decimal("1")
+            and weight >= Decimal("0.50")
+        ):
+            risk_flags.append(
+                {
+                    "severity": "HIGH",
+                    "type": "leveraged_concentration",
+                    "symbol": symbol,
+                    "message": (
+                        f"{symbol} represents "
+                        f"{(weight * 100).quantize(Decimal('0.01'))}% "
+                        "of portfolio at "
+                        f"{leverage}x leverage."
+                    ),
+                }
+            )
+
+        if weight >= Decimal("0.25"):
+            risk_flags.append(
+                {
+                    "severity": "HIGH",
+                    "type": "position_concentration",
+                    "symbol": symbol,
+                    "message": (
+                        f"{symbol} portfolio weight is "
+                        f"{(weight * 100).quantize(Decimal('0.01'))}%."
+                    ),
+                }
+            )
+
+    if total_effective_exposure > Decimal("2.0"):
+        risk_flags.append(
+            {
+                "severity": "HIGH",
+                "type": "gross_exposure",
+                "message": (
+                    "Gross effective exposure is "
+                    f"{(total_effective_exposure * 100).quantize(Decimal('0.01'))}%."
+                ),
+            }
+        )
+
+    # IMPORTANT:
+    # Use the already-normalized buying_power.
+    # The old implementation referenced an undefined
+    # `portfolio` variable here.
+    buying_power = Decimal(
+        str(
+            normalized.get(
+                "buying_power",
+                "0",
+            )
+        )
+    )
+
+    if buying_power <= 0:
+        risk_flags.append(
+            {
+                "severity": "INFO",
+                "type": "zero_buying_power",
+                "message": "Buying power is $0.",
+            }
+        )
+
+    return {
+        "portfolio_value": normalized.get(
+            "portfolio_value",
+            "0.00",
+        ),
+        "buying_power": normalized.get(
+            "buying_power",
+            "0.00",
+        ),
+        "gross_effective_exposure": str(
+            total_effective_exposure.quantize(
+                Decimal("0.0001"),
+                rounding=ROUND_HALF_UP,
+            )
+        ),
+        "risk_flags": risk_flags,
+    }
+
 
 async def read_live_tax_lots(
     session,
@@ -709,7 +940,12 @@ def flatten_tax_lots(
                 continue
 
             lot = dict(row)
-            lot.setdefault("symbol", symbol)
+
+            lot.setdefault(
+                "symbol",
+                symbol,
+            )
+
             lots.append(lot)
 
     return {
@@ -721,7 +957,10 @@ async def read_live_portfolio(
     session,
     account_number: str,
 ) -> dict:
-    """Read the complete live portfolio, dynamically from positions."""
+    """
+    Read the complete live portfolio dynamically
+    from the Robinhood account.
+    """
 
     portfolio_result = await call_read_only(
         session,
@@ -751,10 +990,10 @@ async def read_live_portfolio(
         positions
     )
 
-
     # IMPORTANT:
-    # Quotes are based on the actual positions,
+    # Quotes are based on actual positions,
     # not a hard-coded watchlist.
+
     quotes = {}
 
     if symbols:
@@ -773,10 +1012,12 @@ async def read_live_portfolio(
     tax_lots_by_symbol = {}
 
     if symbols:
-        tax_lots_by_symbol = await read_live_tax_lots(
-            session,
-            account_number,
-            symbols,
+        tax_lots_by_symbol = (
+            await read_live_tax_lots(
+                session,
+                account_number,
+                symbols,
+            )
         )
 
     tax_lots = flatten_tax_lots(
@@ -789,15 +1030,6 @@ async def read_live_portfolio(
         quotes,
     )
 
-    # print("\nRAW QUOTES:")
-    # print(json.dumps(quotes, indent=2, default=str))
-
-    # print("\nRAW PORTFOLIO:")
-    # print(json.dumps(portfolio, indent=2, default=str))
-
-    # print("\nRAW POSITIONS:")
-    # print(json.dumps(positions, indent=2, default=str))
-
     return {
         "portfolio": portfolio,
         "positions": positions,
@@ -807,6 +1039,46 @@ async def read_live_portfolio(
         "symbols": symbols,
     }
 
+def evaluate_portfolio_risk(portfolio_payload: dict) -> dict:
+    """
+    Convert the live Robinhood payload into the Portfolio model
+    and evaluate it with the RiskEngine.
+    """
+
+    policy = load_policy()
+
+    portfolio = Portfolio.from_robinhood_payload(
+        portfolio_payload
+    )
+
+    engine = RiskEngine(policy)
+
+    report = engine.evaluate(portfolio)
+
+    # Add useful portfolio-level information for display.
+    report["portfolio_value"] = str(
+        portfolio.portfolio_value
+    )
+
+    report["buying_power"] = str(
+        portfolio.buying_power
+    )
+
+    report["positions"] = {
+        position.symbol: {
+            "weight": str(position.weight),
+            "market_value": str(position.market_value),
+            "leverage": str(
+                position.effective_leverage_multiplier
+            ),
+            "effective_exposure": str(
+                position.effective_leverage_contribution
+            ),
+        }
+        for position in portfolio.positions
+    }
+
+    return report
 
 def print_portfolio_report(
     payload: dict,
@@ -850,7 +1122,8 @@ def print_portfolio_report(
 
     print()
     print(
-        f"Tax lots: {len(payload['tax_lots']['lots'])}"
+        f"Tax lots: "
+        f"{len(payload['tax_lots']['lots'])}"
     )
 
     print()
@@ -874,7 +1147,9 @@ async def main():
     oauth_provider = OAuthClientProvider(
         server_url=ROBINHOOD_MCP_URL,
         client_metadata=OAuthClientMetadata(
-            client_name="ClaudeTrade Robinhood MCP Client",
+            client_name=(
+                "ClaudeTrade Robinhood MCP Client"
+            ),
             redirect_uris=[
                 AnyUrl(
                     "http://localhost:8765/callback"
@@ -884,7 +1159,9 @@ async def main():
                 "authorization_code",
                 "refresh_token",
             ],
-            response_types=["code"],
+            response_types=[
+                "code"
+            ],
         ),
         storage=storage,
         redirect_handler=redirect_handler,
@@ -892,8 +1169,9 @@ async def main():
     )
 
     # MCP's OAuth provider is an httpx2 Auth object.
-    # It must be attached to httpx2.AsyncClient and then
-    # passed into streamable_http_client.
+    # Attach it to httpx2.AsyncClient and pass the
+    # client into streamable_http_client.
+
     async with httpx2.AsyncClient(
         auth=oauth_provider,
         follow_redirects=True,
@@ -934,7 +1212,7 @@ async def main():
                 if missing:
                     raise RuntimeError(
                         "Robinhood MCP is missing "
-                        f"required read-only tools: "
+                        "required read-only tools: "
                         f"{sorted(missing)}"
                     )
 
@@ -955,6 +1233,30 @@ async def main():
                         account_number,
                     )
                 )
+
+                # ---------------------------------
+                # RISK ENGINE
+                # ---------------------------------
+
+                risk_report = (
+                    evaluate_portfolio_risk(
+                            portfolio_payload["normalized"]
+                    )
+                )
+
+                print()
+                print("RISK REPORT:")
+                print(
+                    json.dumps(
+                        risk_report,
+                        indent=2,
+                        default=str,
+                    )
+                )
+
+                # ---------------------------------
+                # HUMAN-READABLE PORTFOLIO
+                # ---------------------------------
 
                 print_portfolio_report(
                     portfolio_payload

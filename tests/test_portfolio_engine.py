@@ -10,7 +10,27 @@ from portfolio_engine.policy import load_policy
 from portfolio_engine.risk_engine import RiskEngine
 from portfolio_engine.tax_engine import TaxEngine
 
+def test_from_robinhood_payload_handles_nested_buying_power():
+    payload = {
+        "portfolio": {
+            "total_value": "1036.23",
+            "equity_value": "1036.23",
+            "cash": "0",
+            "buying_power": {
+                "buying_power": "0.0000",
+                "unleveraged_buying_power": "0.0000",
+                "display_currency": "USD",
+            },
+        },
+        "positions": {"positions": []},
+        "quotes": {"quotes": []},
+        "tax_lots": {"lots": []},
+    }
 
+    portfolio = Portfolio.from_robinhood_payload(payload)
+
+    assert portfolio.buying_power == Decimal("0.0000")
+    
 def test_normalize_portfolio_from_live_payload():
     payload = {
         "portfolio": {

@@ -120,54 +120,207 @@ class Portfolio:
     positions: list[Position]
 
     @classmethod
-    def from_robinhood_payload(cls, payload: dict[str, Any]) -> "Portfolio":
-        portfolio_data = payload.get("portfolio", {}) if isinstance(payload, dict) else {}
-        if not isinstance(portfolio_data, dict):
-            portfolio_data = {}
+    def from_robinhood_payload(
+        cls,
+        payload: dict[str, Any],
+    ) -> "Portfolio":
+        """
+        Build Portfolio from ClaudeTrade's normalized Robinhood payload.
 
-        portfolio_value = Decimal(str(portfolio_data.get("market_value", portfolio_data.get("equity", 0))))
-        cash = Decimal(str(portfolio_data.get("cash", 0)))
-        buying_power = Decimal(str(portfolio_data.get("buying_power", 0)))
+        Expected normalized structure:
 
-        positions_block = payload.get("positions", {}) if isinstance(payload, dict) else {}
-        if not isinstance(positions_block, dict):
-            positions_block = {}
-        position_rows = positions_block.get("positions", [])
-        quote_rows = payload.get("quotes", {}).get("quotes", []) if isinstance(payload, dict) else []
+        {
+            "portfolio_value": "1037.60",
+            "buying_power": "0.00",
+            "positions": {
+                "NFLX": {
+                    "quantity": "...",
+                    "last_price": "...",
+                    "market_value": "...",
+                    "weight": "...",
+                    "leverage_multiplier": "...",
+                    "effective_leverage_contribution": "..."
+                },
+                ...
+            }
+        }
+        """
 
-        tax_lots_block = payload.get("tax_lots", {}) if isinstance(payload, dict) else {}
-        if not isinstance(tax_lots_block, dict):
-            tax_lots_block = {}
-        tax_lots_rows = tax_lots_block.get("lots", [])
-        tax_lot_index: dict[str, list[dict[str, Any]]] = {}
-        for lot in tax_lots_rows:
-            if not isinstance(lot, dict):
-                continue
-            symbol = str(lot.get("symbol") or "").upper()
-            if symbol:
-                tax_lot_index.setdefault(symbol, []).append(lot)
-
-        quote_map = {}
-        for item in quote_rows:
-            symbol = str(item.get("symbol", "")).upper()
-            if symbol:
-                quote_map[symbol] = Decimal(str(item.get("last_trade_price", item.get("price", 0))))
-
-        normalized_positions = []
-        for pos in position_rows:
-            symbol = str(pos.get("symbol", "")).upper()
-            if not symbol:
-                continue
-            normalized_positions.append(
-                Position.from_robinhood_position(pos, quote_map, portfolio_value, tax_lot_index.get(symbol, []))
+        if not isinstance(payload, dict):
+            raise TypeError(
+                "Portfolio payload must be a dictionary."
             )
 
-        if normalized_positions:
-            total = sum((p.market_value for p in normalized_positions), Decimal("0"))
-            if total > 0:
-                for pos in normalized_positions:
-                    pos.weight = q(pos.market_value / total)
-                    pos.effective_leverage_contribution = q(pos.weight * pos.effective_leverage_multiplier)
+        # ---------------------------------------------------------
+        # Portfolio-level values
+        # ---------------------------------------------------------
+
+        portfolio_value = Decimal(
+            str(
+                payload.get(
+                    "portfolio_value",
+                    "0",
+                )
+                or "0"
+            )
+        )
+
+        buying_power = Decimal(
+            str(
+                payload.get(
+                    "buying_power",
+                    "0",
+                )
+                or "0"
+            )
+        )
+
+        # Normalized payload does not currently expose cash
+        # separately, so default it to zero.
+        cash = Decimal(
+            str(
+                payload.get(
+                    "cash",
+                    "0",
+                )
+                or "0"
+            )
+        )
+
+        # ---------------------------------------------------------
+        # Positions
+        # ---------------------------------------------------------
+
+        positions_block = payload.get(
+            "positions",
+            {},
+        )
+
+        if not isinstance(positions_block, dict):
+            positions_block = {}
+
+        normalized_positions: list[Position] = []
+
+        for symbol, row in positions_block.items():
+
+            if not isinstance(row, dict):
+                continue
+
+            symbol = str(symbol).upper().strip()
+
+            if not symbol:
+                continue
+
+            quantity = Decimal(
+                str(
+                    row.get(
+                        "quantity",
+                        "0",
+                    )
+                    or "0"
+                )
+            )
+
+            last_price = Decimal(
+                str(
+                    row.get(
+                        "last_price",
+                        "0",
+                    )
+                    or "0"
+                )
+            )
+
+            market_value = Decimal(
+                str(
+                    row.get(
+                        "market_value",
+                        "0",
+                    )
+                    or "0"
+                )
+            )
+
+            weight = Decimal(
+                str(
+                    row.get(
+                        "weight",
+                        "0",
+                    )
+                    or "0"
+                )
+            )
+
+            leverage_multiplier = Decimal(
+                str(
+                    row.get(
+                        "leverage_multiplier",
+                        "1",
+                    )
+                    or "1"
+                )
+            )
+
+            effective_leverage_contribution = Decimal(
+                str(
+                    row.get(
+                        "effective_leverage_contribution",
+                        weight * leverage_multiplier,
+                    )
+                    or "0"
+                )
+            )
+
+            normalized_positions.append(
+                Position(
+                    symbol=symbol,
+                    quantity=quantity,
+                    last_price=q(last_price),
+                    market_value=q(market_value),
+                    weight=weight,
+                    effective_leverage_multiplier=leverage_multiplier,
+                    effective_leverage_contribution=(
+                        effective_leverage_contribution
+                    ),
+                    tax_lots=[],
+                )
+            )
+
+        # ---------------------------------------------------------
+        # Recalculate weights from actual position values
+        # ---------------------------------------------------------
+        #
+        # This prevents stale/incorrect weights from propagating
+        # into the risk engine.
+        #
+        # Use the normalized portfolio value when available.
+        # ---------------------------------------------------------
+
+        total_position_value = sum(
+            (
+                position.market_value
+                for position in normalized_positions
+            ),
+            Decimal("0"),
+        )
+
+        denominator = (
+            portfolio_value
+            if portfolio_value > 0
+            else total_position_value
+        )
+
+        if denominator > 0:
+            for position in normalized_positions:
+
+                position.weight = q(
+                    position.market_value / denominator
+                )
+
+                position.effective_leverage_contribution = q(
+                    position.weight
+                    * position.effective_leverage_multiplier
+                )
 
         return cls(
             portfolio_value=q(portfolio_value),
@@ -175,7 +328,7 @@ class Portfolio:
             buying_power=q(buying_power),
             positions=normalized_positions,
         )
-
+    
     @property
     def total_effective_leverage(self) -> Decimal:
         return sum((p.effective_leverage_contribution for p in self.positions), Decimal("0"))

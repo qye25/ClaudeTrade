@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
@@ -35,6 +36,11 @@ from robinhood_agent.client import (
 
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+
+VALID_ANALYSTS = {"market", "social", "news", "fundamentals"}
+FAST_ANALYSTS = ("market", "news")
+FULL_ANALYSTS = ("market", "social", "news", "fundamentals")
 
 
 def build_portfolio_context(portfolio: Portfolio) -> str:
@@ -74,6 +80,48 @@ def build_portfolio_context(portfolio: Portfolio) -> str:
                 )
 
     return "\n".join(lines)
+
+
+def resolve_run_config(mode: str) -> tuple[tuple[str, ...], dict]:
+    """Resolve analyst selection and thinking/debate settings."""
+    requested_mode = mode.lower()
+    if requested_mode not in {"fast", "full"}:
+        raise ValueError("mode must be 'fast' or 'full'")
+
+    config = DEFAULT_CONFIG.copy()
+
+    env_analysts = os.getenv("TRADINGAGENTS_ANALYSTS", "").strip()
+    env_thinking = os.getenv("TRADINGAGENTS_GOOGLE_THINKING_LEVEL", "").strip()
+
+    if requested_mode == "fast":
+        analysts = FAST_ANALYSTS
+        thinking = env_thinking or "minimal"
+        config["max_debate_rounds"] = 1
+        config["max_risk_discuss_rounds"] = 1
+    else:
+        raw = env_analysts or ",".join(FULL_ANALYSTS)
+        analysts = tuple(item.strip() for item in raw.split(",") if item.strip())
+        invalid = sorted(set(analysts) - VALID_ANALYSTS)
+        if invalid:
+            raise ValueError(
+                "Invalid analyst(s): "
+                f"{invalid}. Valid choices: {sorted(VALID_ANALYSTS)}"
+            )
+        thinking = env_thinking or config.get("google_thinking_level") or "high"
+
+    config["llm_provider"] = "google"
+    config["deep_think_llm"] = os.getenv(
+        "TRADINGAGENTS_DEEP_THINK_LLM",
+        config.get("deep_think_llm", "gemini-3.1-flash-lite"),
+    )
+    config["quick_think_llm"] = os.getenv(
+        "TRADINGAGENTS_QUICK_THINK_LLM",
+        config.get("quick_think_llm", "gemini-3.1-flash-lite"),
+    )
+    config["google_thinking_level"] = thinking
+    config["backend_url"] = None
+
+    return analysts, config
 
 
 async def _open_robinhood_session():
@@ -144,11 +192,13 @@ async def inspect_tax_lot(symbol: str) -> None:
         return
 
 
-async def read_portfolio_and_run(symbol: str | None = None) -> None:
+async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") -> None:
     if LIVE_ORDER_EXECUTION:
         raise RuntimeError(
             "Refusing to start: LIVE_ORDER_EXECUTION must be False."
         )
+
+    analysts, config = resolve_run_config(mode)
 
     async for session, account_number in _open_robinhood_session():
         payload = await read_live_portfolio(
@@ -176,25 +226,8 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
 
         context = build_portfolio_context(portfolio)
 
-        config = DEFAULT_CONFIG.copy()
-        config["llm_provider"] = "google"
-        config["deep_think_llm"] = os.getenv(
-            "TRADINGAGENTS_DEEP_THINK_LLM",
-            config.get("deep_think_llm", "gemini-3.1-flash-lite"),
-        )
-        config["quick_think_llm"] = os.getenv(
-            "TRADINGAGENTS_QUICK_THINK_LLM",
-            config.get("quick_think_llm", "gemini-3.1-flash-lite"),
-        )
-        config["backend_url"] = None
-
         graph = TradingAgentsGraph(
-            selected_analysts=(
-                "market",
-                "social",
-                "news",
-                "fundamentals",
-            ),
+            selected_analysts=analysts,
             debug=False,
             config=config,
         )
@@ -205,11 +238,17 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
         print("TRADINGAGENTS — LIVE ROBINHOOD PORTFOLIO / READ ONLY")
         print("=" * 72)
         print(f"TradingAgents source: {TRADINGAGENTS_ROOT}")
-        print(f"Portfolio value: ${portfolio.portfolio_value}")
-        print(f"Buying power:    ${portfolio.buying_power}")
-        print(f"Research anchor: {anchor}")
-        print()
-        print(context)
+        print(f"Mode:              {mode.upper()}")
+        print(f"Analysts:          {', '.join(analysts)}")
+        print(f"Provider:          {config['llm_provider']}")
+        print(f"Deep-think model:  {config['deep_think_llm']}")
+        print(f"Quick-think model: {config['quick_think_llm']}")
+        print(f"Thinking level:    {config['google_thinking_level']}")
+        print(f"Debate rounds:     {config['max_debate_rounds']}")
+        print(f"Risk rounds:       {config['max_risk_discuss_rounds']}")
+        print(f"Portfolio value:   ${portfolio.portfolio_value}")
+        print(f"Buying power:      ${portfolio.buying_power}")
+        print(f"Research anchor:   {anchor}")
         print()
         print("Running TradingAgents...")
 
@@ -230,9 +269,33 @@ async def read_portfolio_and_run(symbol: str | None = None) -> None:
         return
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run TradingAgents against the live Robinhood portfolio in read-only mode."
+    )
+    parser.add_argument(
+        "symbol",
+        nargs="?",
+        help="Optional research anchor symbol from the current portfolio.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("fast", "full"),
+        default=os.getenv("TRADINGAGENTS_MODE", "fast"),
+        help="Research mode. Fast defaults to market+news and minimal thinking; full uses all four analysts.",
+    )
+    parser.add_argument(
+        "--inspect-tax-lot",
+        metavar="SYMBOL",
+        help="Print raw Robinhood tax-lot fields instead of running TradingAgents.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--inspect-tax-lot":
-        asyncio.run(inspect_tax_lot(sys.argv[2]))
+    args = parse_args()
+    if args.inspect_tax_lot:
+        asyncio.run(inspect_tax_lot(args.inspect_tax_lot))
     else:
-        selected_symbol = sys.argv[1].upper() if len(sys.argv) > 1 else None
-        asyncio.run(read_portfolio_and_run(selected_symbol))
+        selected_symbol = args.symbol.upper() if args.symbol else None
+        asyncio.run(read_portfolio_and_run(selected_symbol, args.mode))

@@ -54,6 +54,61 @@ class GraphSetup:
         self.tool_nodes = tool_nodes
         self.conditional_logic = conditional_logic
 
+    def _analyst_factories(self) -> dict[str, Any]:
+        return {
+            "market": lambda: create_market_analyst(self.quick_thinking_llm),
+            "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
+            "news": lambda: create_news_analyst(self.quick_thinking_llm),
+            "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
+        }
+
+    def setup_research_graph(
+        self, selected_analysts=("market", "news")
+    ):
+        """Build a research-only graph that stops after Research Manager.
+
+        This is used by FAST portfolio research to run one ticker at a time,
+        keeping each model request small while preserving the same analyst/tool
+        behavior as the main TradingAgents graph.
+        """
+        plan = build_analyst_execution_plan(selected_analysts)
+        factories = self._analyst_factories()
+        research_manager_node = create_research_manager(self.deep_thinking_llm)
+
+        workflow = StateGraph(AgentState)
+        for spec in plan.specs:
+            workflow.add_node(spec.agent_node, factories[spec.key]())
+            workflow.add_node(spec.clear_node, create_msg_delete())
+            workflow.add_node(spec.tool_node, self.tool_nodes[spec.key])
+        workflow.add_node("Research Manager", research_manager_node)
+
+        workflow.add_edge(START, plan.specs[0].agent_node)
+        for i, spec in enumerate(plan.specs):
+            workflow.add_conditional_edges(
+                spec.agent_node,
+                getattr(self.conditional_logic, f"should_continue_{spec.key}"),
+                [spec.tool_node, spec.clear_node],
+            )
+            workflow.add_edge(spec.tool_node, spec.agent_node)
+            if i < len(plan.specs) - 1:
+                workflow.add_edge(spec.clear_node, plan.specs[i + 1].agent_node)
+            else:
+                workflow.add_edge(spec.clear_node, "Research Manager")
+
+        workflow.add_edge("Research Manager", END)
+        return workflow.compile()
+
+    def setup_portfolio_manager_graph(self):
+        """Build a graph containing only the final Portfolio Manager."""
+        workflow = StateGraph(AgentState)
+        workflow.add_node(
+            "Portfolio Manager",
+            create_portfolio_manager(self.deep_thinking_llm),
+        )
+        workflow.add_edge(START, "Portfolio Manager")
+        workflow.add_edge("Portfolio Manager", END)
+        return workflow.compile()
+
     def setup_graph(
         self, selected_analysts=("market", "social", "news", "fundamentals")
     ):
@@ -65,13 +120,7 @@ class GraphSetup:
         context. FULL mode retains the normal debate/risk workflow.
         """
         plan = build_analyst_execution_plan(selected_analysts)
-
-        analyst_factories = {
-            "market": lambda: create_market_analyst(self.quick_thinking_llm),
-            "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
-            "news": lambda: create_news_analyst(self.quick_thinking_llm),
-            "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
-        }
+        analyst_factories = self._analyst_factories()
 
         bull_researcher_node = create_bull_researcher(self.quick_thinking_llm)
         bear_researcher_node = create_bear_researcher(self.quick_thinking_llm)
@@ -121,7 +170,6 @@ class GraphSetup:
         minimal_mode = get_config().get("google_thinking_level") == "minimal"
 
         if minimal_mode:
-            # FAST: skip the bull/bear debate entirely.
             workflow.add_edge("Bull Researcher", "Research Manager")
         else:
             for debate_node in ("Bull Researcher", "Bear Researcher"):
@@ -132,12 +180,14 @@ class GraphSetup:
                 )
 
         if minimal_mode:
-            # FAST: skip Trader and the three-way risk debate. The Portfolio
-            # Manager receives the research plan plus the complete portfolio.
             workflow.add_edge("Research Manager", "Portfolio Manager")
         else:
             workflow.add_edge("Research Manager", "Trader")
-            for risk_node in ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
+            for risk_node in (
+                "Aggressive Analyst",
+                "Conservative Analyst",
+                "Neutral Analyst",
+            ):
                 workflow.add_conditional_edges(
                     risk_node,
                     self.conditional_logic.should_continue_risk_analysis,

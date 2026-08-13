@@ -1,12 +1,4 @@
-"""Portfolio Manager: synthesises the risk-analyst debate into the final decision.
-
-Uses LangChain's ``with_structured_output`` so the LLM produces a typed
-``PortfolioDecision`` directly, in a single call.  The result is rendered
-back to markdown for storage in ``final_trade_decision`` so memory log,
-CLI display, and saved reports continue to consume the same shape they do
-today.  When a provider does not expose structured output, the agent falls
-back gracefully to free-text generation.
-"""
+"""Portfolio Manager: synthesises the risk-analyst debate into the final decision."""
 
 from __future__ import annotations
 
@@ -32,6 +24,7 @@ def create_portfolio_manager(llm):
         risk_debate_state = state["risk_debate_state"]
         research_plan = state["investment_plan"]
         trader_plan = state["trader_investment_plan"]
+        portfolio_context = state.get("portfolio_context", "")
 
         past_context = state.get("past_context", "")
         lessons_line = (
@@ -40,18 +33,27 @@ def create_portfolio_manager(llm):
             else ""
         )
 
-        prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
+        portfolio_line = (
+            f"\n**CURRENT PORTFOLIO (PRIMARY DECISION CONTEXT):**\n"
+            f"{portfolio_context}\n"
+            if portfolio_context
+            else "\n**CURRENT PORTFOLIO:** unavailable\n"
+        )
+
+        prompt = f"""As the Portfolio Manager, synthesize the research and risk debate into the final AI-native trading decision.
+
+The instrument below is the research anchor. The final decision must consider the ENTIRE portfolio, not just the anchor instrument.
 
 {instrument_context}
-
+{portfolio_line}
 ---
 
 **Rating Scale** (use exactly one):
-- **Buy**: Strong conviction to enter or add to position
-- **Overweight**: Favorable outlook, gradually increase exposure
-- **Hold**: Maintain current position, no action needed
-- **Underweight**: Reduce exposure, take partial profits
-- **Sell**: Exit position or avoid entry
+- **Buy**: Strong conviction to enter or add to the portfolio exposure
+- **Overweight**: Favorable outlook; increase portfolio exposure gradually
+- **Hold**: Maintain exposure; no immediate portfolio action
+- **Underweight**: Reduce exposure or trim concentration
+- **Sell**: Exit the exposure
 
 **Context:**
 - Research Manager's investment plan: **{research_plan}**
@@ -62,7 +64,14 @@ def create_portfolio_manager(llm):
 
 ---
 
-Be decisive and ground every conclusion in specific evidence from the analysts.
+Portfolio decision requirements:
+1. Evaluate concentration, leverage, liquidity, and current exposure across the whole account.
+2. Identify the most important portfolio-level risk or opportunity before choosing the rating.
+3. Do not assume an existing position must be held.
+4. When recommending a change, explain the portfolio-level reason in complete sentences.
+5. Do not claim that a trade is feasible merely because it is desirable; distinguish investment judgment from execution feasibility.
+
+Be decisive and ground every conclusion in specific evidence from the analysts and the portfolio context.
 
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
 
@@ -80,7 +89,7 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
             "aggressive_history": risk_debate_state["aggressive_history"],
             "conservative_history": risk_debate_state["conservative_history"],
             "neutral_history": risk_debate_state["neutral_history"],
-            "latest_speaker": "Judge",
+            "latest_speaker": "Portfolio Manager",
             "current_aggressive_response": risk_debate_state["current_aggressive_response"],
             "current_conservative_response": risk_debate_state["current_conservative_response"],
             "current_neutral_response": risk_debate_state["current_neutral_response"],

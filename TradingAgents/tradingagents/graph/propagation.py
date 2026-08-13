@@ -15,10 +15,20 @@ class Propagator:
         """Initialize with configuration parameters."""
         self.max_recur_limit = max_recur_limit
         self.portfolio_context = ""
+        self.research_symbols: tuple[str, ...] = ()
 
     def set_portfolio_context(self, portfolio_context: str) -> None:
         """Set the current account context for the next graph run."""
         self.portfolio_context = portfolio_context or ""
+
+    def set_research_symbols(self, research_symbols: list[str] | tuple[str, ...]) -> None:
+        """Set the portfolio holdings that analysts should research deeply."""
+        cleaned = []
+        for symbol in research_symbols:
+            value = str(symbol).upper().strip()
+            if value and value not in cleaned:
+                cleaned.append(value)
+        self.research_symbols = tuple(cleaned)
 
     def create_initial_state(
         self,
@@ -28,8 +38,10 @@ class Propagator:
         past_context: str = "",
         instrument_context: str = "",
         portfolio_context: str = "",
+        research_symbols: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         """Create the initial state for the agent graph."""
+        selected_research = tuple(research_symbols or self.research_symbols)
         return {
             "messages": [("human", company_name)],
             "company_of_interest": company_name,
@@ -38,6 +50,7 @@ class Propagator:
             "trade_date": str(trade_date),
             "past_context": past_context,
             "portfolio_context": portfolio_context or self.portfolio_context,
+            "research_symbols": selected_research,
             "investment_debate_state": InvestDebateState(
                 {
                     "bull_history": "",

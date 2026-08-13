@@ -39,6 +39,27 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 VALID_ANALYSTS = {"market", "social", "news", "fundamentals"}
 FAST_ANALYSTS = ("market", "news")
 FULL_ANALYSTS = ("market", "social", "news", "fundamentals")
+VALID_PROVIDERS = {
+    "google",
+    "openai",
+    "anthropic",
+    "groq",
+    "cerebras",
+    "openrouter",
+    "mistral",
+    "deepseek",
+    "xai",
+    "qwen",
+    "qwen-cn",
+    "glm",
+    "glm-cn",
+    "minimax",
+    "minimax-cn",
+    "kimi",
+    "nvidia",
+    "ollama",
+    "openai_compatible",
+}
 
 
 def build_portfolio_context(portfolio: Portfolio) -> str:
@@ -73,7 +94,13 @@ def resolve_run_config(mode: str) -> tuple[tuple[str, ...], dict]:
 
     config = DEFAULT_CONFIG.copy()
     env_analysts = os.getenv("TRADINGAGENTS_ANALYSTS", "").strip()
+    env_provider = os.getenv("TRADINGAGENTS_LLM_PROVIDER", "google").strip().lower()
     env_thinking = os.getenv("TRADINGAGENTS_GOOGLE_THINKING_LEVEL", "").strip()
+
+    if env_provider not in VALID_PROVIDERS:
+        raise ValueError(
+            f"Invalid provider '{env_provider}'. Valid choices: {sorted(VALID_PROVIDERS)}"
+        )
 
     if requested_mode == "fast":
         analysts = FAST_ANALYSTS
@@ -88,7 +115,7 @@ def resolve_run_config(mode: str) -> tuple[tuple[str, ...], dict]:
             raise ValueError(f"Invalid analyst(s): {invalid}. Valid choices: {sorted(VALID_ANALYSTS)}")
         thinking = env_thinking or config.get("google_thinking_level") or "high"
 
-    config["llm_provider"] = "google"
+    config["llm_provider"] = env_provider
     config["deep_think_llm"] = os.getenv(
         "TRADINGAGENTS_DEEP_THINK_LLM",
         config.get("deep_think_llm", "gemini-3.1-flash-lite"),
@@ -97,8 +124,14 @@ def resolve_run_config(mode: str) -> tuple[tuple[str, ...], dict]:
         "TRADINGAGENTS_QUICK_THINK_LLM",
         config.get("quick_think_llm", "gemini-3.1-flash-lite"),
     )
-    config["google_thinking_level"] = thinking
-    config["backend_url"] = None
+
+    if env_provider == "google":
+        config["google_thinking_level"] = thinking
+    else:
+        config["google_thinking_level"] = None
+        config["reasoning_effort"] = os.getenv("TRADINGAGENTS_REASONING_EFFORT", "") or None
+
+    config["backend_url"] = os.getenv("TRADINGAGENTS_LLM_BACKEND_URL") or None
     return analysts, config
 
 
@@ -189,7 +222,12 @@ async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") 
         print(f"Provider:          {config['llm_provider']}")
         print(f"Deep-think model:  {config['deep_think_llm']}")
         print(f"Quick-think model: {config['quick_think_llm']}")
-        print(f"Thinking level:    {config['google_thinking_level']}")
+        if config["llm_provider"] == "google":
+            print(f"Thinking level:    {config['google_thinking_level']}")
+        elif config.get("reasoning_effort"):
+            print(f"Reasoning effort:  {config['reasoning_effort']}")
+        if config.get("backend_url"):
+            print(f"Backend URL:       {config['backend_url']}")
         print(f"Debate rounds:     {config['max_debate_rounds']}")
         print(f"Risk rounds:       {config['max_risk_discuss_rounds']}")
         print(f"Portfolio value:   ${portfolio.portfolio_value}")

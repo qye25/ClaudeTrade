@@ -23,16 +23,10 @@ from __future__ import annotations
 import logging
 import re
 
-# NoMarketDataError lives in the vendor-error taxonomy (errors.py); re-exported
-# here for the many call sites that import it alongside normalize_symbol.
 from .errors import NoMarketDataError as NoMarketDataError
 
 logger = logging.getLogger(__name__)
 
-
-# ISO-4217 codes common enough to appear in retail forex pairs. A bare
-# six-letter symbol whose halves are BOTH in this set is treated as a spot
-# forex pair and given Yahoo's ``=X`` suffix.
 _FOREX_CURRENCIES = frozenset(
     {
         "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
@@ -41,26 +35,18 @@ _FOREX_CURRENCIES = frozenset(
     }
 )
 
-# Crypto bases that brokers quote against USD without a separator.
 _CRYPTO_BASES = frozenset(
     {"BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "LTC", "BCH", "DOT", "AVAX", "LINK"}
 )
 
-# Explicit aliases for instruments whose broker symbol does not map to a
-# Yahoo symbol by rule. Metals/energy resolve to their front-month future;
-# index CFD names resolve to the underlying Yahoo index symbol. Extend by
-# adding rows — no call site changes required.
 _ALIASES = {
-    # Precious metals (spot names -> COMEX/NYMEX futures)
     "XAUUSD": "GC=F", "XAU": "GC=F", "GOLD": "GC=F",
     "XAGUSD": "SI=F", "XAG": "SI=F", "SILVER": "SI=F",
     "XPTUSD": "PL=F", "XPDUSD": "PA=F",
-    # Energy
     "WTICOUSD": "CL=F", "USOIL": "CL=F", "WTI": "CL=F",
     "BCOUSD": "BZ=F", "UKOIL": "BZ=F", "BRENT": "BZ=F",
     "NATGAS": "NG=F", "XNGUSD": "NG=F",
     "COPPER": "HG=F", "XCUUSD": "HG=F",
-    # Index CFDs -> Yahoo index symbols
     "SPX500": "^GSPC", "US500": "^GSPC", "SPX": "^GSPC",
     "NAS100": "^NDX", "US100": "^NDX", "USTEC": "^NDX",
     "US30": "^DJI", "DJI30": "^DJI", "WS30": "^DJI",
@@ -69,22 +55,16 @@ _ALIASES = {
     "FRA40": "^FCHI", "EU50": "^STOXX50E", "HK50": "^HSI",
 }
 
-# Yahoo symbols may contain letters, digits, and these structural characters.
+# Broker/terminal exchanges that sometimes get appended to US equity/ETF
+# symbols (for example ``UPRO.PCX``). Yahoo Finance expects the bare US
+# ticker here, so these suffixes are stripped before vendor lookup.
+_YAHOO_EXCHANGE_SUFFIXES = (".PCX", ".NYSE", ".NASDAQ", ".NMS")
+
 _YAHOO_SAFE = re.compile(r"^[A-Za-z0-9._\-\^=]+$")
-
-
-# Crypto quote currencies that all map to Yahoo's USD pair. Yahoo lists only
-# ``<BASE>-USD`` (not the USDT/USDC stablecoin pairs), so a broker symbol quoted
-# in any of these resolves to ``-USD`` (#982). Longest first so ``USDT``/``USDC``
-# match before the ``USD`` substring.
 _CRYPTO_QUOTES = ("USDT", "USDC", "USD")
 
 
 def crypto_base(raw: str) -> str | None:
-    """Return the crypto base (e.g. ``BTC``) for a known USD/USDT/USDC-quoted
-    crypto symbol in any form the pipeline may hold — ``BTC-USD``, ``BTCUSD``,
-    ``BTC-USDT`` — or None for non-crypto symbols. Purely syntactic.
-    """
     if not isinstance(raw, str):
         return None
     compact = raw.strip().upper().rstrip("+").replace("-", "")
@@ -96,32 +76,25 @@ def crypto_base(raw: str) -> str | None:
 
 
 def _normalize_crypto(s: str) -> str | None:
-    """Return ``<BASE>-USD`` for a known USD/USDT/USDC-quoted crypto, else None."""
     base = crypto_base(s)
     return f"{base}-USD" if base else None
 
 
 def normalize_symbol(raw: str) -> str:
-    """Map a user/broker symbol to its canonical Yahoo Finance symbol.
-
-    Resolution order (first match wins):
-      1. Explicit alias table (metals, energy, index CFDs).
-      2. Crypto rule: a known crypto base quoted in USD/USDT/USDC (dashed or
-         not) -> ``BASE-USD``.
-      3. Forex rule: six letters that are two ISO currency codes -> ``PAIR=X``.
-      4. Otherwise the upper-cased symbol is returned unchanged (plain
-         equities, ETFs, Yahoo-native symbols like ``GC=F`` or ``^GSPC``).
-
-    A trailing ``+`` (broker CFD marker, e.g. ``XAUUSD+``) is stripped before
-    matching. The function is purely syntactic — it performs no network
-    calls — so it is safe to apply on every request.
-    """
+    """Map a user/broker symbol to its canonical Yahoo Finance symbol."""
     if not isinstance(raw, str) or not raw.strip():
         return raw
 
-    s = raw.strip().upper()
-    # Broker CFD/qualifier suffixes Yahoo never uses.
-    s = s.rstrip("+")
+    original = raw.strip().upper()
+    s = original.rstrip("+")
+
+    # Strip broker/terminal exchange suffixes that Yahoo does not use for
+    # ordinary US stocks/ETFs. This is especially important for NYSE Arca ETFs
+    # such as UPRO: Robinhood may surface ``UPRO.PCX`` while Yahoo expects ``UPRO``.
+    for suffix in _YAHOO_EXCHANGE_SUFFIXES:
+        if s.endswith(suffix) and len(s) > len(suffix):
+            s = s[: -len(suffix)]
+            break
 
     crypto = _normalize_crypto(s)
     if s in _ALIASES:
@@ -133,11 +106,10 @@ def normalize_symbol(raw: str) -> str:
     else:
         canonical = s
 
-    if canonical != raw.strip().upper():
+    if canonical != original:
         logger.info("Resolved symbol %r to Yahoo symbol %r", raw, canonical)
     return canonical
 
 
 def is_yahoo_safe(symbol: str) -> bool:
-    """True when ``symbol`` only contains characters Yahoo symbols use."""
     return bool(symbol) and _YAHOO_SAFE.fullmatch(symbol) is not None

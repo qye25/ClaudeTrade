@@ -19,6 +19,42 @@ def create_news_analyst(llm):
         instrument_context = get_instrument_context_from_state(state)
         research_symbols = get_research_symbols_from_state(state)
         research_context = ", ".join(research_symbols)
+        minimal_mode = state.get("minimal_mode", False)
+
+        if minimal_mode:
+            symbol = str(state["company_of_interest"]).upper()
+            try:
+                company_news = get_news.invoke(
+                    {"ticker": symbol, "start_date": current_date, "end_date": current_date}
+                )
+            except Exception as exc:
+                company_news = f"Company news unavailable for {symbol}: {exc}"
+            try:
+                global_news = get_global_news.invoke(
+                    {"curr_date": current_date, "look_back_days": 3, "limit": 5}
+                )
+            except Exception as exc:
+                global_news = f"Global news unavailable: {exc}"
+            compact_prompt = f"""You are a news researcher supporting a portfolio manager.
+Analyze ONLY {symbol} using the supplied recent news evidence plus concise macro context.
+Do not request tools and do not invent events.
+
+Instrument context:
+{instrument_context}
+
+Company news:
+{company_news}
+
+Global/macro news:
+{global_news}
+
+Return a compact report covering catalysts, risks, sentiment, and what could materially change the portfolio decision.
+""" + get_language_instruction()
+            response = llm.invoke(compact_prompt)
+            return {
+                "messages": [response],
+                "news_report": response.content if hasattr(response, "content") else str(response),
+            }
 
         tools = [
             get_news,

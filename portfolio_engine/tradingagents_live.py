@@ -5,6 +5,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 import os
+import re
 import sys
 import time
 from datetime import date
@@ -86,6 +87,84 @@ def build_portfolio_context(portfolio: Portfolio) -> str:
                     f"term={lot.term}, wash_sale={lot.wash_sale_status}"
                 )
     return "\n".join(lines)
+
+
+def build_research_planner_context(portfolio: Portfolio) -> str:
+    lines = [
+        f"Portfolio value: ${portfolio.portfolio_value}",
+        f"Buying power: ${portfolio.buying_power}",
+        f"Effective leverage: {portfolio.total_effective_leverage}x",
+        "Holdings:",
+    ]
+    for position in sorted(portfolio.positions, key=lambda p: p.market_value, reverse=True):
+        lines.append(
+            f"- {position.symbol}: weight={position.weight:.4f}, "
+            f"market_value=${position.market_value:.2f}, "
+            f"leverage={position.effective_leverage_multiplier}x"
+        )
+    return "\n".join(lines)
+
+
+def _extract_json_object(text: str) -> dict:
+    cleaned = (text or "").strip()
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+        if not match:
+            raise ValueError("Research planner did not return JSON")
+        payload = json.loads(match.group(0))
+    if not isinstance(payload, dict):
+        raise ValueError("Research planner response must be a JSON object")
+    return payload
+
+
+def choose_research_symbols(
+    graph: TradingAgentsGraph,
+    portfolio: Portfolio,
+    limit: int = 3,
+) -> tuple[tuple[str, ...], str]:
+    """Use the same TradingAgents quick model to select the research universe."""
+    candidates = [p.symbol for p in portfolio.positions]
+    prompt = f"""
+You are the research planner for a portfolio-level trading system.
+Choose up to {limit} existing portfolio holdings that deserve detailed market/news research
+before the Portfolio Manager makes ONE decision for the entire account.
+
+Prioritize positions where research could materially change the portfolio decision based on
+concentration, leverage, risk, catalysts, or unusual exposure. Do not invent symbols. Return
+ONLY valid JSON with this shape:
+{{"symbols":["UPRO","TSLA"],"reason":"one concise sentence"}}
+
+AVAILABLE HOLDINGS:
+{build_research_planner_context(portfolio)}
+""".strip()
+
+    response = graph.quick_thinking_llm.invoke(prompt)
+    text = getattr(response, "content", None) or str(response)
+    payload = _extract_json_object(text)
+
+    selected_raw = payload.get("symbols", [])
+    selected = []
+    candidate_set = {s.upper() for s in candidates}
+    if isinstance(selected_raw, list):
+        for value in selected_raw:
+            symbol = str(value).upper().strip()
+            if symbol in candidate_set and symbol not in selected:
+                selected.append(symbol)
+            if len(selected) >= limit:
+                break
+
+    if not selected:
+        selected = [
+            p.symbol
+            for p in sorted(portfolio.positions, key=lambda p: p.market_value, reverse=True)[:limit]
+        ]
+        reason = "Planner fallback: selected the largest portfolio positions."
+    else:
+        reason = str(payload.get("reason", "AI-selected research universe."))
+
+    return tuple(selected), reason
 
 
 def resolve_run_config(mode: str) -> tuple[tuple[str, ...], dict]:
@@ -208,12 +287,15 @@ async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") 
         if not portfolio.positions:
             raise RuntimeError("No equity positions were found in the live portfolio.")
 
-        anchor = symbol.upper() if symbol else max(portfolio.positions, key=lambda p: p.market_value).symbol
         known_symbols = {p.symbol for p in portfolio.positions}
-        if anchor not in known_symbols:
-            raise ValueError(
-                f"Anchor symbol {anchor} is not in the live portfolio. Available: {sorted(known_symbols)}"
-            )
+        if symbol:
+            anchor = symbol.upper()
+            if anchor not in known_symbols:
+                raise ValueError(
+                    f"Anchor symbol {anchor} is not in the live portfolio. Available: {sorted(known_symbols)}"
+                )
+        else:
+            anchor = max(portfolio.positions, key=lambda p: p.market_value).symbol
 
         context = build_portfolio_context(portfolio)
 
@@ -221,6 +303,24 @@ async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") 
         graph = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
         graph_init_elapsed = time.perf_counter() - graph_start
         graph.propagator.set_portfolio_context(context)
+
+        planner_start = time.perf_counter()
+        try:
+            research_limit = max(1, min(5, int(os.getenv("TRADINGAGENTS_RESEARCH_SYMBOL_LIMIT", "3"))))
+        except ValueError:
+            research_limit = 3
+        research_symbols, planner_reason = choose_research_symbols(
+            graph,
+            portfolio,
+            limit=research_limit,
+        )
+        planner_elapsed = time.perf_counter() - planner_start
+        if anchor not in research_symbols:
+            research_symbols = (anchor,) + tuple(
+                symbol_value for symbol_value in research_symbols if symbol_value != anchor
+            )[: max(0, research_limit - 1)]
+            planner_reason = f"Anchor {anchor} included; {planner_reason}"
+        graph.propagator.set_research_symbols(research_symbols)
 
         print("=" * 72)
         print("TRADINGAGENTS — LIVE ROBINHOOD PORTFOLIO / READ ONLY")
@@ -241,9 +341,12 @@ async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") 
         print(f"Risk rounds:       {config['max_risk_discuss_rounds']}")
         print(f"Portfolio value:   ${portfolio.portfolio_value}")
         print(f"Buying power:      ${portfolio.buying_power}")
-        print(f"Research anchor:   {anchor}")
+        print(f"Primary anchor:    {anchor}")
+        print(f"Research universe: {', '.join(research_symbols)}")
+        print(f"Planner:           {planner_reason}")
         print(f"Portfolio read:    {portfolio_elapsed:.2f}s")
         print(f"Graph init:        {graph_init_elapsed:.2f}s")
+        print(f"Research planner:  {planner_elapsed:.2f}s")
         print()
         print("Running TradingAgents...", flush=True)
 
@@ -262,6 +365,7 @@ async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") 
         print("-" * 72)
         print(f"Portfolio read:    {portfolio_elapsed:.2f}s")
         print(f"Graph init:        {graph_init_elapsed:.2f}s")
+        print(f"Research planner:  {planner_elapsed:.2f}s")
         print(f"TradingAgents run: {graph_run_elapsed:.2f}s")
         print(f"Total runtime:     {total_elapsed:.2f}s")
         print()

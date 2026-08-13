@@ -8,6 +8,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_stock_data,
     get_verified_market_snapshot,
 )
+from tradingagents.dataflows.config import get_config
 
 
 def create_market_analyst(llm):
@@ -17,6 +18,7 @@ def create_market_analyst(llm):
         instrument_context = get_instrument_context_from_state(state)
         research_symbols = get_research_symbols_from_state(state)
         research_context = ", ".join(research_symbols)
+        minimal_mode = get_config().get("google_thinking_level") == "minimal"
 
         tools = [
             get_stock_data,
@@ -24,31 +26,24 @@ def create_market_analyst(llm):
             get_verified_market_snapshot,
         ]
 
+        indicator_limit = 4 if minimal_mode else 8
+        lookback_days = 20 if minimal_mode else 60
+
         system_message = (
             """You are a trading assistant tasked with analyzing financial markets. """
             "The portfolio manager will make one decision for the entire account. "
             "Your job is to research every symbol in the selected research universe, "
             "not just the primary anchor. Use exact tickers in tool calls and clearly "
             "separate evidence for each symbol. "
-            "For each symbol, select the most relevant indicators from the following list. "
-            "The goal is to choose up to 8 indicators per symbol that provide complementary insights without redundancy. Categories and each category's indicators are:\n\n"
-            "Moving Averages:\n"
-            "- close_50_sma: 50 SMA: A medium-term trend indicator.\n"
-            "- close_200_sma: 200 SMA: A long-term trend benchmark.\n"
-            "- close_10_ema: 10 EMA: A responsive short-term average.\n\n"
-            "MACD Related:\n"
-            "- macd: MACD momentum indicator.\n"
-            "- macds: MACD signal line.\n"
-            "- macdh: MACD histogram.\n\n"
-            "Momentum Indicators:\n"
-            "- rsi: RSI momentum indicator.\n\n"
-            "Volatility Indicators:\n"
-            "- boll: Bollinger middle band.\n"
-            "- boll_ub: Bollinger upper band.\n"
-            "- boll_lb: Bollinger lower band.\n"
-            "- atr: Average True Range.\n\n"
-            "Volume-Based Indicators:\n"
-            "- vwma: Volume-weighted moving average.\n\n"
+            f"For each symbol, select no more than {indicator_limit} complementary technical indicators. "
+            f"For technical indicators, use at most {lookback_days} calendar days of history. "
+            "Keep outputs concise and avoid unnecessary historical rows. "
+            "Indicators:\n"
+            "- Moving averages: close_50_sma, close_200_sma, close_10_ema.\n"
+            "- MACD: macd, macds, macdh.\n"
+            "- Momentum: rsi.\n"
+            "- Volatility: boll, boll_ub, boll_lb, atr.\n"
+            "- Volume: vwma.\n\n"
             "Use diverse, complementary indicators. Call get_stock_data before get_indicators. "
             "Call get_verified_market_snapshot for each researched ticker before making exact price-level claims. "
             "Do not invent historical validation, support/resistance bounces, or exact percentage moves. "

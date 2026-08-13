@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from langchain_core.messages import MessagesState
+from langgraph.graph import MessagesState
 from typing_extensions import TypedDict
 
 

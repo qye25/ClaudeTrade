@@ -51,6 +51,8 @@ class Propagator:
             "past_context": past_context,
             "portfolio_context": portfolio_context or self.portfolio_context,
             "research_symbols": selected_research,
+            "investment_plan": "",
+            "trader_investment_plan": "",
             "investment_debate_state": InvestDebateState(
                 {
                     "bull_history": "",

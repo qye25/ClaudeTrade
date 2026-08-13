@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import json
 import os
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -191,14 +192,19 @@ async def inspect_tax_lot(symbol: str) -> None:
 
 
 async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") -> None:
+    total_start = time.perf_counter()
+
     if LIVE_ORDER_EXECUTION:
         raise RuntimeError("Refusing to start: LIVE_ORDER_EXECUTION must be False.")
 
     analysts, config = resolve_run_config(mode)
 
     async with _open_robinhood_session() as (session, account_number):
+        portfolio_start = time.perf_counter()
         payload = await read_live_portfolio(session, account_number)
         portfolio = Portfolio.from_robinhood_payload(payload)
+        portfolio_elapsed = time.perf_counter() - portfolio_start
+
         if not portfolio.positions:
             raise RuntimeError("No equity positions were found in the live portfolio.")
 
@@ -210,7 +216,10 @@ async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") 
             )
 
         context = build_portfolio_context(portfolio)
+
+        graph_start = time.perf_counter()
         graph = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
+        graph_init_elapsed = time.perf_counter() - graph_start
         graph.propagator.set_portfolio_context(context)
 
         print("=" * 72)
@@ -233,16 +242,28 @@ async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") 
         print(f"Portfolio value:   ${portfolio.portfolio_value}")
         print(f"Buying power:      ${portfolio.buying_power}")
         print(f"Research anchor:   {anchor}")
+        print(f"Portfolio read:    {portfolio_elapsed:.2f}s")
+        print(f"Graph init:        {graph_init_elapsed:.2f}s")
         print()
-        print("Running TradingAgents...")
+        print("Running TradingAgents...", flush=True)
 
+        graph_run_start = time.perf_counter()
         _, decision = graph.propagate(anchor, date.today().isoformat(), asset_type="stock")
+        graph_run_elapsed = time.perf_counter() - graph_run_start
+        total_elapsed = time.perf_counter() - total_start
 
         print()
         print("=" * 72)
         print("TRADINGAGENTS FINAL PORTFOLIO DECISION")
         print("=" * 72)
         print(decision)
+        print()
+        print("TIMING")
+        print("-" * 72)
+        print(f"Portfolio read:    {portfolio_elapsed:.2f}s")
+        print(f"Graph init:        {graph_init_elapsed:.2f}s")
+        print(f"TradingAgents run: {graph_run_elapsed:.2f}s")
+        print(f"Total runtime:     {total_elapsed:.2f}s")
         print()
         print("LIVE ORDER EXECUTION: DISABLED")
         print("=" * 72)

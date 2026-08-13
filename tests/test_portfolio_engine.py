@@ -13,23 +13,86 @@ from portfolio_engine.tax_engine import TaxEngine
 def test_from_robinhood_payload_handles_nested_buying_power():
     payload = {
         "portfolio": {
-            "total_value": "1036.23",
-            "equity_value": "1036.23",
+            "total_value": "10000.00",
+            "equity_value": "10000.00",
+            "options_value": "0",
+            "futures_value": "0",
+            "event_contracts_value": "0",
+            "crypto_value": "0",
             "cash": "0",
+            "pending_deposits": "0",
+            "mutual_funds_value": "0",
+            "fixed_income_value": "0",
+            "currency": "USD",
             "buying_power": {
-                "buying_power": "0.0000",
-                "unleveraged_buying_power": "0.0000",
+                "buying_power": "500.00",
+                "unleveraged_buying_power": "500.00",
                 "display_currency": "USD",
             },
         },
-        "positions": {"positions": []},
-        "quotes": {"quotes": []},
-        "tax_lots": {"lots": []},
+        "positions": {
+            "positions": [
+                {
+                    "symbol": "TSLA",
+                    "quantity": "1.000000",
+                    "intraday_quantity": "0.000000",
+                    "average_buy_price": "300.000000",
+                    "shares_available_for_sells": "1.000000",
+                    "shares_held_for_sells": "0.000000",
+                    "shares_held_for_stock_grants": "0.000000",
+                    "shares_held_for_options_events": "0.000000",
+                    "shares_held_for_asset_transfer": "0.000000",
+                    "shares_pending_from_options_events": "0.000000",
+                    "type": "long",
+                }
+            ]
+        },
+        "quotes": {
+            "results": [
+                {
+                    "quote": {
+                        "symbol": "TSLA",
+                        "last_trade_price": "300.000000",
+                        "venue_last_trade_time": "2026-08-12T19:59:59.90277549Z",
+                        "last_non_reg_trade_price": "300.000000",
+                        "venue_last_non_reg_trade_time": "2026-08-13T01:53:47.468Z",
+                        "adjusted_previous_close": "300.000000",
+                        "previous_close": "300.000000",
+                        "previous_close_date": "2026-08-12",
+                        "bid_price": "299.990000",
+                        "ask_price": "300.010000",
+                        "has_traded": True,
+                        "state": "active",
+                    },
+                    "close": {
+                        "symbol": "TSLA",
+                        "date": "2026-08-12",
+                        "price": "300.00",
+                        "interpolated": False,
+                        "source": "sip-list-exchange-close",
+                    },
+                }
+            ]
+        },
+        "tax_lots": {
+            "lots": []
+        },
     }
 
     portfolio = Portfolio.from_robinhood_payload(payload)
 
-    assert portfolio.buying_power == Decimal("0.0000")
+    assert portfolio.portfolio_value == Decimal("10000.0000")
+    assert portfolio.buying_power == Decimal("500.0000")
+    assert portfolio.cash == Decimal("0.0000")
+
+    assert len(portfolio.positions) == 1
+
+    position = portfolio.positions[0]
+
+    assert position.symbol == "TSLA"
+    assert position.quantity == Decimal("1.000000")
+    assert position.last_price == Decimal("300.0000")
+    assert position.market_value == Decimal("300.0000")
     
 def test_normalize_portfolio_from_live_payload():
     payload = {

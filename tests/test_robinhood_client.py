@@ -79,8 +79,14 @@ def test_extract_symbols_empty_positions():
 
 def test_normalize_portfolio():
     portfolio = {
-        "portfolio_value": "10000",
-        "buying_power": "2000",
+        "total_value": "10000",
+        "equity_value": "10000",
+        "cash": "0",
+        "buying_power": {
+            "buying_power": "2000",
+            "unleveraged_buying_power": "2000",
+            "display_currency": "USD",
+        },
     }
 
     positions = {
@@ -88,20 +94,36 @@ def test_normalize_portfolio():
             {
                 "symbol": "AAPL",
                 "quantity": "10",
-                "market_value": "5000",
             },
             {
                 "symbol": "UPRO",
                 "quantity": "10",
-                "market_value": "3000",
             },
         ]
     }
 
     quotes = {
-        "quotes": [
-            {"symbol": "AAPL", "price": "500"},
-            {"symbol": "UPRO", "price": "300"},
+        "results": [
+            {
+                "quote": {
+                    "symbol": "AAPL",
+                    "last_trade_price": "500",
+                },
+                "close": {
+                    "symbol": "AAPL",
+                    "price": "500",
+                },
+            },
+            {
+                "quote": {
+                    "symbol": "UPRO",
+                    "last_trade_price": "300",
+                },
+                "close": {
+                    "symbol": "UPRO",
+                    "price": "300",
+                },
+            },
         ]
     }
 
@@ -117,9 +139,11 @@ def test_normalize_portfolio():
     assert normalized["positions"]["AAPL"]["quantity"] == "10"
     assert normalized["positions"]["AAPL"]["last_price"] == "500"
 
+    assert normalized["positions"]["UPRO"]["quantity"] == "10"
+    assert normalized["positions"]["UPRO"]["last_price"] == "300"
+
     assert normalized["positions"]["UPRO"]["leverage_multiplier"] == "3"
     assert normalized["positions"]["UPRO"]["weight"] == "0.3000"
-
 
 def test_read_live_portfolio_discovers_symbols_and_tax_lots():
     async def run():

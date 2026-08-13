@@ -125,164 +125,306 @@ class Portfolio:
         payload: dict[str, Any],
     ) -> "Portfolio":
         """
-        Build Portfolio from ClaudeTrade's normalized Robinhood payload.
+        Convert the live Robinhood MCP payload into the Portfolio model.
 
-        Expected normalized structure:
+        Expected payload shape:
 
-        {
-            "portfolio_value": "1037.60",
-            "buying_power": "0.00",
-            "positions": {
-                "NFLX": {
-                    "quantity": "...",
-                    "last_price": "...",
-                    "market_value": "...",
-                    "weight": "...",
-                    "leverage_multiplier": "...",
-                    "effective_leverage_contribution": "..."
+            {
+                "portfolio": {
+                    "total_value": "1037.55",
+                    "equity_value": "1037.55",
+                    "cash": "0",
+                    "buying_power": {
+                        "buying_power": "0.0000",
+                        "unleveraged_buying_power": "0.0000",
+                        "display_currency": "USD"
+                    }
                 },
-                ...
+                "positions": {
+                    "positions": [
+                        {
+                            "symbol": "UPRO",
+                            "quantity": "4.000000",
+                            "average_buy_price": "84.100000"
+                        }
+                    ]
+                },
+                "quotes": {
+                    "results": [
+                        {
+                            "quote": {
+                                "symbol": "UPRO",
+                                "last_trade_price": "154.620000"
+                            },
+                            "close": {
+                                "symbol": "UPRO",
+                                "price": "154.55"
+                            }
+                        }
+                    ]
+                },
+                "tax_lots": {
+                    "lots": [...]
+                }
             }
-        }
         """
 
-        if not isinstance(payload, dict):
-            raise TypeError(
-                "Portfolio payload must be a dictionary."
-            )
+        portfolio_data = (
+            payload.get("portfolio", {})
+            if isinstance(payload, dict)
+            else {}
+        )
+
+        if not isinstance(portfolio_data, dict):
+            portfolio_data = {}
 
         # ---------------------------------------------------------
-        # Portfolio-level values
+        # Portfolio value
         # ---------------------------------------------------------
+        #
+        # Actual Robinhood MCP:
+        #
+        # "total_value": "1037.55"
+        #
+        # Do NOT look only for "market_value" or "equity".
+        #
+        raw_portfolio_value = (
+            portfolio_data.get("total_value")
+            or portfolio_data.get("equity_value")
+            or portfolio_data.get("market_value")
+            or portfolio_data.get("equity")
+            or 0
+        )
 
         portfolio_value = Decimal(
-            str(
-                payload.get(
-                    "portfolio_value",
-                    "0",
-                )
-                or "0"
-            )
+            str(raw_portfolio_value)
         )
+
+        # ---------------------------------------------------------
+        # Cash
+        # ---------------------------------------------------------
+
+        raw_cash = portfolio_data.get("cash", 0)
+
+        if isinstance(raw_cash, dict):
+            raw_cash = (
+                raw_cash.get("cash")
+                or raw_cash.get("amount")
+                or 0
+            )
+
+        cash = Decimal(
+            str(raw_cash or 0)
+        )
+
+        # ---------------------------------------------------------
+        # Buying power
+        # ---------------------------------------------------------
+        #
+        # Actual Robinhood MCP:
+        #
+        # "buying_power": {
+        #     "buying_power": "0.0000",
+        #     "unleveraged_buying_power": "0.0000",
+        #     "display_currency": "USD"
+        # }
+        #
+        # Tests and future payload variations may provide a
+        # scalar instead, so support both.
+        #
+
+        raw_buying_power = portfolio_data.get(
+            "buying_power",
+            0,
+        )
+
+        if isinstance(raw_buying_power, dict):
+            raw_buying_power = (
+                raw_buying_power.get("buying_power")
+                or raw_buying_power.get("unleveraged_buying_power")
+                or 0
+            )
 
         buying_power = Decimal(
-            str(
-                payload.get(
-                    "buying_power",
-                    "0",
-                )
-                or "0"
-            )
-        )
-
-        # Normalized payload does not currently expose cash
-        # separately, so default it to zero.
-        cash = Decimal(
-            str(
-                payload.get(
-                    "cash",
-                    "0",
-                )
-                or "0"
-            )
+            str(raw_buying_power or 0)
         )
 
         # ---------------------------------------------------------
         # Positions
         # ---------------------------------------------------------
 
-        positions_block = payload.get(
-            "positions",
-            {},
+        positions_block = (
+            payload.get("positions", {})
+            if isinstance(payload, dict)
+            else {}
         )
 
         if not isinstance(positions_block, dict):
             positions_block = {}
 
-        normalized_positions: list[Position] = []
+        position_rows = positions_block.get(
+            "positions",
+            [],
+        )
 
-        for symbol, row in positions_block.items():
+        if isinstance(position_rows, dict):
+            position_rows = [position_rows]
 
-            if not isinstance(row, dict):
+        if not isinstance(position_rows, list):
+            position_rows = []
+
+        # ---------------------------------------------------------
+        # Quotes
+        # ---------------------------------------------------------
+        #
+        # Actual Robinhood MCP shape:
+        #
+        # {
+        #     "results": [
+        #         {
+        #             "quote": {
+        #                 "symbol": "TSLA",
+        #                 "last_trade_price": "327.45"
+        #             },
+        #             "close": {...}
+        #         }
+        #     ]
+        # }
+        #
+
+        quotes_block = (
+            payload.get("quotes", {})
+            if isinstance(payload, dict)
+            else {}
+        )
+
+        if not isinstance(quotes_block, dict):
+            quotes_block = {}
+
+        quote_rows = quotes_block.get(
+            "results",
+            [],
+        )
+
+        if isinstance(quote_rows, dict):
+            quote_rows = [quote_rows]
+
+        if not isinstance(quote_rows, list):
+            quote_rows = []
+
+        quote_map: dict[str, Decimal] = {}
+
+        for item in quote_rows:
+            if not isinstance(item, dict):
                 continue
 
-            symbol = str(symbol).upper().strip()
+            quote = item.get("quote", {})
+
+            if not isinstance(quote, dict):
+                continue
+
+            symbol = str(
+                quote.get("symbol", "")
+            ).upper().strip()
 
             if not symbol:
                 continue
 
-            quantity = Decimal(
-                str(
-                    row.get(
-                        "quantity",
-                        "0",
-                    )
-                    or "0"
-                )
+            # Prefer the regular-session last trade.
+            #
+            # Fall back to:
+            #   non-regular trade
+            #   previous close
+            #   close.price
+            #
+            raw_price = (
+                quote.get("last_trade_price")
+                or quote.get("last_non_reg_trade_price")
+                or quote.get("previous_close")
             )
 
-            last_price = Decimal(
-                str(
-                    row.get(
-                        "last_price",
-                        "0",
-                    )
-                    or "0"
-                )
+            if raw_price is None:
+                close = item.get("close", {})
+
+                if isinstance(close, dict):
+                    raw_price = close.get("price")
+
+            if raw_price is None:
+                continue
+
+            quote_map[symbol] = Decimal(
+                str(raw_price)
             )
 
-            market_value = Decimal(
-                str(
-                    row.get(
-                        "market_value",
-                        "0",
-                    )
-                    or "0"
-                )
-            )
+        # ---------------------------------------------------------
+        # Tax lots
+        # ---------------------------------------------------------
 
-            weight = Decimal(
-                str(
-                    row.get(
-                        "weight",
-                        "0",
-                    )
-                    or "0"
-                )
-            )
+        tax_lots_block = (
+            payload.get("tax_lots", {})
+            if isinstance(payload, dict)
+            else {}
+        )
 
-            leverage_multiplier = Decimal(
-                str(
-                    row.get(
-                        "leverage_multiplier",
-                        "1",
-                    )
-                    or "1"
-                )
-            )
+        if not isinstance(tax_lots_block, dict):
+            tax_lots_block = {}
 
-            effective_leverage_contribution = Decimal(
-                str(
-                    row.get(
-                        "effective_leverage_contribution",
-                        weight * leverage_multiplier,
-                    )
-                    or "0"
-                )
-            )
+        tax_lots_rows = tax_lots_block.get(
+            "lots",
+            [],
+        )
+
+        if isinstance(tax_lots_rows, dict):
+            tax_lots_rows = [tax_lots_rows]
+
+        if not isinstance(tax_lots_rows, list):
+            tax_lots_rows = []
+
+        tax_lot_index: dict[
+            str,
+            list[dict[str, Any]],
+        ] = {}
+
+        for lot in tax_lots_rows:
+            if not isinstance(lot, dict):
+                continue
+
+            symbol = str(
+                lot.get("symbol")
+                or ""
+            ).upper().strip()
+
+            if not symbol:
+                continue
+
+            tax_lot_index.setdefault(
+                symbol,
+                [],
+            ).append(lot)
+
+        # ---------------------------------------------------------
+        # Build Position objects
+        # ---------------------------------------------------------
+
+        normalized_positions: list[Position] = []
+
+        for position_row in position_rows:
+            if not isinstance(position_row, dict):
+                continue
+
+            symbol = str(
+                position_row.get("symbol", "")
+            ).upper().strip()
+
+            if not symbol:
+                continue
 
             normalized_positions.append(
-                Position(
-                    symbol=symbol,
-                    quantity=quantity,
-                    last_price=q(last_price),
-                    market_value=q(market_value),
-                    weight=weight,
-                    effective_leverage_multiplier=leverage_multiplier,
-                    effective_leverage_contribution=(
-                        effective_leverage_contribution
-                    ),
-                    tax_lots=[],
+                Position.from_robinhood_position(
+                    position_row,
+                    quote_map,
+                    portfolio_value,
+                    tax_lot_index.get(symbol, []),
                 )
             )
 
@@ -290,31 +432,18 @@ class Portfolio:
         # Recalculate weights from actual position values
         # ---------------------------------------------------------
         #
-        # This prevents stale/incorrect weights from propagating
-        # into the risk engine.
+        # This is intentionally based on portfolio value rather
+        # than the sum of parsed positions.
         #
-        # Use the normalized portfolio value when available.
-        # ---------------------------------------------------------
+        # The Robinhood account can contain cash or other asset
+        # categories that are not represented in equity_positions.
+        #
 
-        total_position_value = sum(
-            (
-                position.market_value
-                for position in normalized_positions
-            ),
-            Decimal("0"),
-        )
-
-        denominator = (
-            portfolio_value
-            if portfolio_value > 0
-            else total_position_value
-        )
-
-        if denominator > 0:
+        if portfolio_value > 0:
             for position in normalized_positions:
-
                 position.weight = q(
-                    position.market_value / denominator
+                    position.market_value
+                    / portfolio_value
                 )
 
                 position.effective_leverage_contribution = q(
@@ -328,7 +457,7 @@ class Portfolio:
             buying_power=q(buying_power),
             positions=normalized_positions,
         )
-    
+
     @property
     def total_effective_leverage(self) -> Decimal:
         return sum((p.effective_leverage_contribution for p in self.positions), Decimal("0"))

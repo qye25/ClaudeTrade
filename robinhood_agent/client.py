@@ -1039,12 +1039,9 @@ async def read_live_portfolio(
         "symbols": symbols,
     }
 
-def evaluate_portfolio_risk(portfolio_payload: dict) -> dict:
-    """
-    Convert the live Robinhood payload into the Portfolio model
-    and evaluate it with the RiskEngine.
-    """
-
+def evaluate_portfolio_risk(
+    portfolio_payload: dict,
+) -> dict:
     policy = load_policy()
 
     portfolio = Portfolio.from_robinhood_payload(
@@ -1053,32 +1050,7 @@ def evaluate_portfolio_risk(portfolio_payload: dict) -> dict:
 
     engine = RiskEngine(policy)
 
-    report = engine.evaluate(portfolio)
-
-    # Add useful portfolio-level information for display.
-    report["portfolio_value"] = str(
-        portfolio.portfolio_value
-    )
-
-    report["buying_power"] = str(
-        portfolio.buying_power
-    )
-
-    report["positions"] = {
-        position.symbol: {
-            "weight": str(position.weight),
-            "market_value": str(position.market_value),
-            "leverage": str(
-                position.effective_leverage_multiplier
-            ),
-            "effective_exposure": str(
-                position.effective_leverage_contribution
-            ),
-        }
-        for position in portfolio.positions
-    }
-
-    return report
+    return engine.evaluate(portfolio)
 
 def print_portfolio_report(
     payload: dict,
@@ -1228,22 +1200,18 @@ async def main():
                     account_number,
                 )
 
-                portfolio_payload = (
-                    await read_live_portfolio(
-                        session,
-                        account_number,
-                    )
-                )
+                portfolio_payload = await read_live_portfolio(
+    session,
+    account_number,
+)
 
                 # ---------------------------------
                 # RISK ENGINE
                 # ---------------------------------
 
-                risk_report = (
-                    evaluate_portfolio_risk(
-                            portfolio_payload["normalized"]
-                    )
-                )
+                risk_report = evaluate_portfolio_risk(
+    portfolio_payload
+)
 
                 print()
                 print("RISK REPORT:")

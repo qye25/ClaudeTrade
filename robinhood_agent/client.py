@@ -1180,6 +1180,7 @@ async def main():
         async with streamable_http_client(
             ROBINHOOD_MCP_URL,
             http_client=http_client,
+            terminate_on_close=False,
         ) as (
             read_stream,
             write_stream,

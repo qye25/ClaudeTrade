@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from langgraph.graph import MessagesState
+from langchain_core.messages import MessagesState
 from typing_extensions import TypedDict
 
 
@@ -37,6 +37,7 @@ class AgentState(MessagesState):
         str,
         "Current normalized portfolio state, including positions, weights, leverage, cash, buying power, and tax-lot context",
     ]
+    minimal_mode: Annotated[bool, "Use compact no-tool FAST analyst behavior"]
 
     sender: Annotated[str, "Agent that sent this message"]
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 import sys
@@ -13,8 +14,6 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[1]
 TRADINGAGENTS_ROOT = ROOT / "TradingAgents"
 
-# Always use the repository's TradingAgents source instead of a stale package
-# installed in the virtual environment.
 if str(TRADINGAGENTS_ROOT) not in sys.path:
     sys.path.insert(0, str(TRADINGAGENTS_ROOT))
 
@@ -37,14 +36,12 @@ from robinhood_agent.client import (
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 
-
 VALID_ANALYSTS = {"market", "social", "news", "fundamentals"}
 FAST_ANALYSTS = ("market", "news")
 FULL_ANALYSTS = ("market", "social", "news", "fundamentals")
 
 
 def build_portfolio_context(portfolio: Portfolio) -> str:
-    """Create concise account context for TradingAgents prompts."""
     lines = [
         f"Portfolio value: ${portfolio.portfolio_value}",
         f"Cash: ${portfolio.cash}",
@@ -53,43 +50,28 @@ def build_portfolio_context(portfolio: Portfolio) -> str:
         "",
         "Positions:",
     ]
-
-    for position in sorted(
-        portfolio.positions,
-        key=lambda p: p.market_value,
-        reverse=True,
-    ):
+    for position in sorted(portfolio.positions, key=lambda p: p.market_value, reverse=True):
         lines.append(
             "- "
-            f"{position.symbol}: "
-            f"weight={position.weight}, "
-            f"quantity={position.quantity}, "
-            f"market_value=${position.market_value}, "
-            f"leverage={position.effective_leverage_multiplier}x"
+            f"{position.symbol}: weight={position.weight}, quantity={position.quantity}, "
+            f"market_value=${position.market_value}, leverage={position.effective_leverage_multiplier}x"
         )
-
         if position.tax_lots:
             for lot in position.tax_lots:
                 lines.append(
                     "  lot: "
-                    f"qty={lot.quantity}, "
-                    f"cost_basis=${lot.cost_basis}, "
-                    f"acquired={lot.acquisition_date}, "
-                    f"term={lot.term}, "
-                    f"wash_sale={lot.wash_sale_status}"
+                    f"qty={lot.quantity}, cost_basis=${lot.cost_basis}, acquired={lot.acquisition_date}, "
+                    f"term={lot.term}, wash_sale={lot.wash_sale_status}"
                 )
-
     return "\n".join(lines)
 
 
 def resolve_run_config(mode: str) -> tuple[tuple[str, ...], dict]:
-    """Resolve analyst selection and thinking/debate settings."""
     requested_mode = mode.lower()
     if requested_mode not in {"fast", "full"}:
         raise ValueError("mode must be 'fast' or 'full'")
 
     config = DEFAULT_CONFIG.copy()
-
     env_analysts = os.getenv("TRADINGAGENTS_ANALYSTS", "").strip()
     env_thinking = os.getenv("TRADINGAGENTS_GOOGLE_THINKING_LEVEL", "").strip()
 
@@ -103,10 +85,7 @@ def resolve_run_config(mode: str) -> tuple[tuple[str, ...], dict]:
         analysts = tuple(item.strip() for item in raw.split(",") if item.strip())
         invalid = sorted(set(analysts) - VALID_ANALYSTS)
         if invalid:
-            raise ValueError(
-                "Invalid analyst(s): "
-                f"{invalid}. Valid choices: {sorted(VALID_ANALYSTS)}"
-            )
+            raise ValueError(f"Invalid analyst(s): {invalid}. Valid choices: {sorted(VALID_ANALYSTS)}")
         thinking = env_thinking or config.get("google_thinking_level") or "high"
 
     config["llm_provider"] = "google"
@@ -120,14 +99,12 @@ def resolve_run_config(mode: str) -> tuple[tuple[str, ...], dict]:
     )
     config["google_thinking_level"] = thinking
     config["backend_url"] = None
-
     return analysts, config
 
 
+@asynccontextmanager
 async def _open_robinhood_session():
-    """Yield an authenticated Robinhood MCP session and account number."""
     storage = FileTokenStorage(TOKEN_FILE)
-
     from httpx2 import AsyncClient
     from pydantic import AnyUrl
     from mcp import ClientSession
@@ -148,10 +125,7 @@ async def _open_robinhood_session():
         callback_handler=callback_handler,
     )
 
-    async with AsyncClient(
-        auth=oauth_provider,
-        follow_redirects=True,
-    ) as http_client:
+    async with AsyncClient(auth=oauth_provider, follow_redirects=True) as http_client:
         async with streamable_http_client(
             ROBINHOOD_MCP_URL,
             http_client=http_client,
@@ -159,7 +133,6 @@ async def _open_robinhood_session():
         ) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
-
                 tools = await session.list_tools()
                 tool_names = {tool.name for tool in tools.tools}
                 missing = READ_ONLY_TOOLS - tool_names
@@ -168,70 +141,43 @@ async def _open_robinhood_session():
                         "Robinhood MCP is missing required read-only tools: "
                         f"{sorted(missing)}"
                     )
-
                 account_number = await select_agentic_account(session)
                 yield session, account_number
 
 
 async def inspect_tax_lot(symbol: str) -> None:
-    """Print one raw Robinhood tax-lot response for field mapping inspection."""
-    async for session, account_number in _open_robinhood_session():
-        rows_by_symbol = await read_live_tax_lots(
-            session,
-            account_number,
-            [symbol.upper()],
-        )
+    async with _open_robinhood_session() as (session, account_number):
+        rows_by_symbol = await read_live_tax_lots(session, account_number, [symbol.upper()])
         rows = rows_by_symbol.get(symbol.upper(), [])
-
         print("=" * 72)
         print(f"RAW ROBINHOOD TAX LOTS — {symbol.upper()}")
         print("=" * 72)
         print(json.dumps(rows[:3], indent=2, default=str))
         print()
         print(f"Rows returned: {len(rows)}")
-        return
 
 
 async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") -> None:
     if LIVE_ORDER_EXECUTION:
-        raise RuntimeError(
-            "Refusing to start: LIVE_ORDER_EXECUTION must be False."
-        )
+        raise RuntimeError("Refusing to start: LIVE_ORDER_EXECUTION must be False.")
 
     analysts, config = resolve_run_config(mode)
 
-    async for session, account_number in _open_robinhood_session():
-        payload = await read_live_portfolio(
-            session,
-            account_number,
-        )
+    async with _open_robinhood_session() as (session, account_number):
+        payload = await read_live_portfolio(session, account_number)
         portfolio = Portfolio.from_robinhood_payload(payload)
-
         if not portfolio.positions:
-            raise RuntimeError(
-                "No equity positions were found in the live portfolio."
-            )
+            raise RuntimeError("No equity positions were found in the live portfolio.")
 
-        anchor = symbol.upper() if symbol else max(
-            portfolio.positions,
-            key=lambda p: p.market_value,
-        ).symbol
-
+        anchor = symbol.upper() if symbol else max(portfolio.positions, key=lambda p: p.market_value).symbol
         known_symbols = {p.symbol for p in portfolio.positions}
         if anchor not in known_symbols:
             raise ValueError(
-                f"Anchor symbol {anchor} is not in the live portfolio. "
-                f"Available: {sorted(known_symbols)}"
+                f"Anchor symbol {anchor} is not in the live portfolio. Available: {sorted(known_symbols)}"
             )
 
         context = build_portfolio_context(portfolio)
-
-        graph = TradingAgentsGraph(
-            selected_analysts=analysts,
-            debug=False,
-            config=config,
-        )
-
+        graph = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
         graph.propagator.set_portfolio_context(context)
 
         print("=" * 72)
@@ -252,11 +198,7 @@ async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") 
         print()
         print("Running TradingAgents...")
 
-        _, decision = graph.propagate(
-            anchor,
-            date.today().isoformat(),
-            asset_type="stock",
-        )
+        _, decision = graph.propagate(anchor, date.today().isoformat(), asset_type="stock")
 
         print()
         print("=" * 72)
@@ -266,18 +208,13 @@ async def read_portfolio_and_run(symbol: str | None = None, mode: str = "fast") 
         print()
         print("LIVE ORDER EXECUTION: DISABLED")
         print("=" * 72)
-        return
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run TradingAgents against the live Robinhood portfolio in read-only mode."
     )
-    parser.add_argument(
-        "symbol",
-        nargs="?",
-        help="Optional research anchor symbol from the current portfolio.",
-    )
+    parser.add_argument("symbol", nargs="?", help="Optional research anchor symbol from the current portfolio.")
     parser.add_argument(
         "--mode",
         choices=("fast", "full"),
